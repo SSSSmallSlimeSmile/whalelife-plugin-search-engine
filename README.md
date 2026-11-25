@@ -27,7 +27,7 @@ WhaleLife 交流 QQ 群：**962935021**
 | 设置 | 默认值 | 范围/说明 |
 | --- | --- | --- |
 | `search_scholar` | 学术检索（勾选后才有，默认不注册） |
-| 搜索来源 | `anysearch → duckduckgo → bing` | 有序列表，前一个失败才换下一个；可显式加入 Brave Search API（须配 Key，可能产生费用）。首个来源拿剩余预算的 70% |
+| 搜索来源 | `anysearch → duckduckgo → brave → tavily → exa` | 分两级：一级按权重分条数与字符预算（默认 anysearch 5、exa 3），二级便宜兜底（权重 1）。聚合模式下并发打前 `aggregateConcurrency` 家，去重后不够才补下一家；把 `searchMode` 设成 `fallback` 则退回有序链，首个来源拿剩余预算的 70% |
 | AnySearch 区域 | `cn` | `cn` 国内 / `intl` 国际；单次搜索可用 `zone` 覆盖 |
 | AnySearch Key | 空 | 留空走匿名额度；配置后走自己的额度，Key 不回传页面 |
 | 代理 | 不设置，直连 | 可配置 HTTP/HTTPS CONNECT 代理；不自动读取环境代理或浏览器登录态 |
@@ -143,7 +143,7 @@ hasMore    true              还有没给过的
 
 每条结果除了标题、链接、摘要，还带两个字段：
 
-- `via`：这条是怎么来的。`api` = 对方公开 JSON 接口（anysearch / brave / tavily / exa）；`html` = 解析对方搜索页面（duckduckgo / bing）；`custom` = 自定义来源，字段映射由使用者自己填
+- `via`：这条是怎么来的。`api` = 对方公开 JSON 接口（anysearch / brave / tavily / exa）；`html` = 解析对方搜索页面（duckduckgo）；`custom` = 自定义来源，字段映射由使用者自己填
 - `domain`：链接的主机名，去掉 `www.`；URL 解析不出来时这个字段不出现，不编一个
 
 顶层另有 `sourceKind`，就是这一家用的是哪一类。

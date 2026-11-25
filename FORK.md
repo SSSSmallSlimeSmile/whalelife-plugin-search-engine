@@ -21,7 +21,14 @@
    这一路的参数形状取自本机旧的 AnySearch 插件（`plugins/search`），不是上游 surf 有的东西。
 8. **POST 支持**：网络层原来只有 GET；现在允许 POST，但正文不跟随跳转（避免把查询和凭据发到新地址），
    非 2xx 时保留最多 4 KiB 响应体，用来把来源自己说的原因（如缺哪个参数）带进错误文案。
-9. **设置页重做**：改用宿主 `/ui/styles.css` 的通用面板结构，分「来源 / 搜索 / 读取 / 状态」四页签。
+9. **设置页重做**：改用宿主 `/ui/styles.css` 的通用面板结构，页签为「来源 / 学术 / 事实 / 搜索 / 读取」；每张来源卡自带悬浮窗（Key、单源超时、回退来源），可拖动排序、可跨一级/二级拖动。
+10. **聚合模式（默认）**：并发打前 `aggregateConcurrency` 家，每家在 `groups` 里自成一段，跨来源按 URL 去重并标 `dupOf`，顶层给 `overlap`；每段带 `returned / shown / shared / viaMix`。`searchMode` 可切回 `fallback`。
+11. **两级来源与权重**：`providerTiers`（一级可设回退、二级不设）+ `providerWeights`（1–5），`resultsMaxChars` 与条数按权重分配，而不是各家均分。
+12. **预算与健康**：`sourceTimeouts` 单源上限、`cacheSeconds` 结果缓存（只缓存成功）、`sourceFailThreshold` / `sourceCooldownSeconds` 来源冷却（没轮到的来源不计失败、零条算应答清账）。
+13. **结果集翻页**：回执带 `setId / shown / available / hasMore`，传 `more` 取下一批，不发请求、不重复给。
+14. **学术与事实检索**：`search_scholar`（arXiv / OpenAlex / Crossref / Semantic Scholar / Europe PMC）、`search_facts`（维基百科 / 维基数据 / OpenLibrary / OEIS），运行时注册——勾选后才进工具表。
+15. **结构化读取**：GitHub issue/PR/release、Stack Exchange（按票排、已采纳置顶）、arXiv、维基百科改走各自公开 API，失败回落页面抓取。
+16. **来源削减**：移除 `bing`（解析早已失效、恒零条）与 `github` / `huggingface`（它们查的不是网页）；未知来源名一律拒绝，不再静默落到 duckduckgo。
 
 
 其中 2–6 的调度思路参考自 `Lain-in-coding/dsh-grok-search`（MIT），代码按本插件结构重写，
