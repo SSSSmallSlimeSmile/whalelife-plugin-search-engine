@@ -150,6 +150,43 @@ function untilCancelled<T>(signal: AbortSignal, task: () => Promise<T>): Promise
   });
 }
 
+
+/** 条数预算：limit 是这一轮总共要几条，不是每家几条。先每家垫 1，剩下的按权重分。 */
+function quotaFor(limit: number, weights: number[], available: number[]): number[] {
+  const taken = available.map(() => 0);
+  const indexes = available.map((count, index) => index).filter(index => available[index] > 0);
+  let left = Math.max(0, limit);
+  for (const index of indexes) {
+    if (left <= 0) break;
+    taken[index] = 1;
+    left -= 1;
+  }
+  while (left > 0) {
+    const hungry = indexes.filter(index => taken[index] < available[index]);
+    if (hungry.length === 0) break;
+    const sum = hungry.reduce((total, index) => total + Math.max(1, weights[index] ?? 1), 0);
+    let moved = false;
+    for (const index of hungry) {
+      if (left <= 0) break;
+      const weight = Math.max(1, weights[index] ?? 1);
+      const add = Math.max(1, Math.floor(left * weight / sum));
+      const cap = Math.min(add, available[index] - taken[index], left);
+      if (cap > 0) { taken[index] += cap; left -= cap; moved = true; }
+    }
+    if (!moved) break;
+  }
+  return taken;
+}
+
+/** 段内按配额取，重复的排后面——同一条在别家已经出现过，就不该挤掉独有内容。 */
+function takeCapped<T extends { dupOf?: string }>(items: T[], quota: number): { kept: T[]; dropped: number } {
+  if (items.length <= quota) return { kept: items, dropped: 0 };
+  const order = new Map<T, number>(items.map((item, index) => [item, index]));
+  const kept = [...items.filter(item => !item.dupOf), ...items.filter(item => item.dupOf)].slice(0, quota);
+  kept.sort((left, right) => (order.get(left) ?? 0) - (order.get(right) ?? 0));
+  return { kept, dropped: items.length - kept.length };
+}
+
 export class SurfRuntime implements SurfService {
   config: SurfConfig;
   private fetcher: PublicFetcher;
@@ -513,21 +550,6 @@ export class SurfRuntime implements SurfService {
     const groups = raw.filter((group): group is AggregateGroup => group !== undefined);
     if (cursor < providers.length && uniqueCount() >= limit)
       notes.push('前 ' + cursor + ' 家去重后已经有 ' + uniqueCount() + ' 条，够 limit，剩下的 ' + (providers.length - cursor) + ' 家这次没打。');
-    // 权重切预算：先算份额再裁，不让排在前面的先到先得吃掉整份。
-    const totalChars = config.resultsMaxChars;
-    if (totalChars > 0) {
-      const weights = groups.map(group => this.weightOf(group.provider, config));
-      const sum = weights.reduce((left, right) => left + right, 0) || groups.length;
-      groups.forEach((group, index) => {
-        const share = Math.max(1, Math.floor(totalChars * weights[index] / sum));
-        group.weight = weights[index];
-        group.budgetChars = share;
-        if (group.results.length === 0) return;
-        const trimmed = trimResults(group.results, share);
-        if (trimmed.truncated) group.truncated = (group.truncated ?? 0) + trimmed.truncated;
-        group.results = trimmed.results;
-      });
-    }
     // 重复：同一 URL 先出现的算主，后面几家里的标 dupOf。
     const first = new Map<string, string>();
     let overlap = 0;
@@ -538,6 +560,35 @@ export class SurfRuntime implements SurfService {
         if (owner === undefined) { first.set(key, group.provider); continue; }
         if (owner !== group.provider && !item.dupOf) { item.dupOf = owner; overlap += 1; }
       }
+    }
+    // 条数预算是全局的：limit 是这一轮要几条，不是每家几条。先去重，再分名额。
+    {
+      const valid = groups.filter(group => group.results.length > 0);
+      if (valid.length > 0) {
+        const weights = valid.map(group => this.weightOf(group.provider, config));
+        const quotas = quotaFor(limit, weights, valid.map(group => group.results.length));
+        valid.forEach((group, index) => {
+          const { kept, dropped } = takeCapped(group.results, quotas[index]);
+          if (dropped > 0) group.truncated = (group.truncated ?? 0) + dropped;
+          group.results = kept;
+        });
+      }
+    }
+    // 权重切预算：先算份额再裁，不让排在前面的先到先得吃掉整份。
+    const totalChars = config.resultsMaxChars;
+    if (totalChars > 0) {
+      // 空段（超时、零条、被条数预算取空）不参与分预算，否则它那份白扔。
+      const pool = groups.filter(group => group.results.length > 0);
+      const weights = pool.map(group => this.weightOf(group.provider, config));
+      const sum = weights.reduce((left, right) => left + right, 0) || pool.length;
+      for (const group of groups) group.weight = this.weightOf(group.provider, config);
+      pool.forEach((group, index) => {
+        const share = Math.max(1, Math.floor(totalChars * weights[index] / sum));
+        group.budgetChars = share;
+        const trimmed = trimResults(group.results, share);
+        if (trimmed.truncated) group.truncated = (group.truncated ?? 0) + trimmed.truncated;
+        group.results = trimmed.results;
+      });
     }
     if (!groups.some(group => group.results.length > 0)) {
       // 二级也失败时，它的原因同样要带出来，否则读的人只看到原来那家为什么挂。
@@ -680,6 +731,18 @@ export class SurfRuntime implements SurfService {
         if (owner !== group.source) { item.dupOf = owner; overlap += 1; }
         // 同一篇后来又贡献了新键（比如这家填了 DOI，前面那家没填），补登记，后面的来源才认得。
         for (const key of keys) if (!first.has(key)) first.set(key, group.source);
+      }
+    }
+    // 条数预算同样是全局的：limit 是这一轮要几篇，不是每家几篇。
+    {
+      const valid = groups.filter(group => group.items.length > 0);
+      if (valid.length > 0) {
+        const quotas = quotaFor(limit, valid.map(() => 1), valid.map(group => group.items.length));
+        valid.forEach((group, index) => {
+          const { kept, dropped } = takeCapped(group.items, quotas[index]);
+          if (dropped > 0) group.truncated = (group.truncated ?? 0) + dropped;
+          group.items = kept;
+        });
       }
     }
     // 预算按家数均分再裁；摘要按整条序列化后的长度算，不按字数——中文一个字符三个字节，字数会低估。

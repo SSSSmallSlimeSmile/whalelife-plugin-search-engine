@@ -63,14 +63,14 @@ test('前两家给的条数不够，就按链序补下一家', async () => {
 
 test('预算按权重切：没配过一级 3、二级 1', async () => {
   const surf = runtime(three, { resultsMaxChars: 4000, providerTiers: { 'custom:two': 2 }, aggregateConcurrency: 3 });
-  const out = data(await surf.search({ ...input, limit: 1 }));
+  const out = data(await surf.search({ ...input, limit: 3 }));
   assert.deepEqual(out.groups?.map(group => group.weight), [3, 1, 3]);
   assert.deepEqual(out.groups?.map(group => group.budgetChars), [1714, 571, 1714]);
 });
 
 test('显式权重压过缺省，份额跟着变', async () => {
   const surf = runtime(three, { resultsMaxChars: 1200, providerWeights: { 'custom:one': 5, 'custom:two': 2 }, aggregateConcurrency: 2 });
-  const out = data(await surf.search({ ...input, limit: 1 }));
+  const out = data(await surf.search({ ...input, limit: 2 }));
   assert.deepEqual(out.groups?.map(group => group.weight), [5, 2]);
   assert.deepEqual(out.groups?.map(group => group.budgetChars), [857, 342]);
 });
@@ -86,4 +86,25 @@ test('配置校验：二级来源不许挂回退，权重只收 1–5', () => {
   assert.deepEqual(ok.providerTiers, { duckduckgo: 2 });
   assert.deepEqual(ok.providerWeights, { anysearch: 5 });
   assert.equal(ok.aggregateConcurrency, 3);
+});
+
+test('limit 是这一轮总共几条，不是每家几条', async () => {
+  const many = (url: string) => {
+    const name = ['one', 'two', 'three'].find(item => url.includes(item + '.example')) ?? 'one';
+    return reply(url, { data: Array.from({ length: 5 }, (_, index) => hit(name + index, 'https://' + name + '.example/' + index)) });
+  };
+  const surf = runtime(many, { aggregateConcurrency: 2, providerWeights: { 'custom:one': 5, 'custom:two': 3 } });
+  const out = data(await surf.search({ ...input, limit: 5 }));
+  const total = (out.groups ?? []).reduce((sum, group) => sum + group.results.length, 0);
+  assert.equal(total, 5, '两家各 5 条，总数也得是 5');
+  assert.deepEqual(out.groups?.map(group => group.results.length), [3, 2], '按权重 5:3 分到 3 条和 2 条');
+});
+
+test('空段不参与分预算，那份不白扔', async () => {
+  const half = (url: string) => url.includes('one.example') ? reply(url, { data: [] }) : three(url);
+  const surf = runtime(half, { resultsMaxChars: 4000, aggregateConcurrency: 2 });
+  const out = data(await surf.search({ ...input, limit: 3 }));
+  const budgets = out.groups?.map(group => group.budgetChars);
+  assert.equal(budgets?.[0], undefined, '零条那家不占预算');
+  assert.ok((budgets?.[1] ?? 0) > 1000, '剩下的份额给有结果的段');
 });
