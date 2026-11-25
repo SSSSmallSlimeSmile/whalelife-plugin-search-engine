@@ -19,10 +19,13 @@ export interface CustomSource {
   snippet: string;
   /** 可选 API Key，放在 Authorization: Bearer。 */
   key: string;
+  /** 学术自定义来源专用：作者、年份的点路径，可为空。网页与事实来源忽略这两项。 */
+  authors?: string;
+  year?: string;
 }
 export type PublicCustomSource = Omit<CustomSource, 'key'> & { hasKey: boolean };
 export type SearchZone = 'cn' | 'intl';
-export type ScholarSource = 'arxiv' | 'crossref' | 'openalex' | 'semanticscholar';
+export type ScholarSource = 'arxiv' | 'crossref' | 'openalex' | 'semanticscholar' | `custom:${string}`;
 export interface SurfConfig {
   searchProviders: SearchProvider[];
   braveApiKey: string;
@@ -58,10 +61,16 @@ export interface SurfConfig {
   factsLang: 'zh' | 'en';
   /** 自定义 JSON 来源，只有用户自己加过才有。 */
   customSources: CustomSource[];
+  /** 学术页的自定义来源；名字以 custom: 前缀出现在 scholarSources 里。 */
+  scholarCustomSources: CustomSource[];
+  /** 事实页的自定义来源；同上。 */
+  factsCustomSources: CustomSource[];
 }
-export type PublicConfig = Omit<SurfConfig, 'braveApiKey' | 'anysearchApiKey' | 'tavilyApiKey' | 'exaApiKey' | 'proxyUrl' | 'customSources'> & {
+export type PublicConfig = Omit<SurfConfig, 'braveApiKey' | 'anysearchApiKey' | 'tavilyApiKey' | 'exaApiKey' | 'proxyUrl' | 'customSources' | 'scholarCustomSources' | 'factsCustomSources'> & {
   searchProvider: SearchProvider;
   customSources: PublicCustomSource[];
+  scholarCustomSources: PublicCustomSource[];
+  factsCustomSources: PublicCustomSource[];
   hasBraveApiKey: boolean; hasAnySearchApiKey: boolean; hasTavilyApiKey: boolean; hasExaApiKey: boolean; hasProxy: boolean;
 };
 export interface FetchOptions {
@@ -125,7 +134,7 @@ export interface ScholarData {
   notes?: string[];
   cached?: boolean; cachedAgoMs?: number;
 }
-export type FactSource = 'wikipedia' | 'wikidata' | 'openlibrary' | 'oeis';
+export type FactSource = 'wikipedia' | 'wikidata' | 'openlibrary' | 'oeis' | `custom:${string}`;
 export interface FactInput {
   query: string; limit?: number;
   /** 只查其中几个来源，按给定顺序；不传就用设置里的顺序。 */

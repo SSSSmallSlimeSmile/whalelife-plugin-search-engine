@@ -14,7 +14,7 @@ export const defaults: SurfConfig = {
   maxTextChars: 60_000, resultsLimit: 5, structuredRead: true, resultsMaxChars: 8000, referenceTtlSeconds: 600, concurrency: 3, cacheSeconds: 300, sourceFailThreshold: 2, sourceCooldownSeconds: 60,
   scholarEnabled: false, scholarSources: ['arxiv', 'openalex', 'crossref'], scholarMailto: '',
   factsEnabled: false, factsSources: ['wikipedia', 'wikidata', 'openlibrary', 'oeis'], factsLang: 'zh',
-  customSources: [],
+  customSources: [], scholarCustomSources: [], factsCustomSources: [],
 };
 export function object(input: unknown): Record<string, unknown> {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new SurfError('invalid_input');
@@ -52,7 +52,7 @@ function parseCustomSources(input: unknown): CustomSource[] {
   for (const raw of input) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new SurfError('config_invalid');
     const item = raw as Record<string, unknown>;
-    if (Object.keys(item).some(key => !['name', 'url', 'method', 'items', 'title', 'link', 'snippet', 'key'].includes(key)))
+    if (Object.keys(item).some(key => !['name', 'url', 'method', 'items', 'title', 'link', 'snippet', 'key', 'authors', 'year'].includes(key)))
       throw new SurfError('config_invalid');
     const name = item.name, url = item.url;
     if (typeof name !== 'string' || !CUSTOM_NAME.test(name) || seen.has(name)) throw new SurfError('config_invalid');
@@ -70,8 +70,13 @@ function parseCustomSources(input: unknown): CustomSource[] {
     if (snippet !== '' && (typeof snippet !== 'string' || !CUSTOM_PATH.test(snippet))) throw new SurfError('config_invalid');
     const key = item.key ?? '';
     if (typeof key !== 'string' || key.length > 512 || /[\x00-\x20\x7f]/.test(key)) throw new SurfError('config_invalid');
+    const authors = item.authors ?? '', year = item.year ?? '';
+    for (const path of [authors, year]) {
+      if (path !== '' && (typeof path !== 'string' || !CUSTOM_PATH.test(path))) throw new SurfError('config_invalid');
+    }
     seen.add(name);
-    output.push({ name, url, method, items, title, link, snippet: snippet as string, key });
+    output.push({ name, url, method, items, title, link, snippet: snippet as string, key,
+      ...(authors ? { authors: authors as string } : {}), ...(year ? { year: year as string } : {}) });
   }
   return output;
 }
@@ -83,7 +88,14 @@ export function parseConfig(value: unknown): SurfConfig {
     const input = object(value), result = { ...defaults };
     if (Object.keys(input).some(key => key !== 'searchProvider' && !Object.hasOwn(defaults, key))) throw new SurfError('config_invalid');
     if (input.customSources !== undefined) result.customSources = parseCustomSources(input.customSources);
+    if (input.scholarCustomSources !== undefined) result.scholarCustomSources = parseCustomSources(input.scholarCustomSources);
+    if (input.factsCustomSources !== undefined) result.factsCustomSources = parseCustomSources(input.factsCustomSources);
+    // 三个列表的名字共用一个命名空间：custom:名字 出现在哪条链上必须没有歧义。
+    const everyName = [...result.customSources, ...result.scholarCustomSources, ...result.factsCustomSources].map(source => source.name);
+    if (new Set(everyName).size !== everyName.length) throw new SurfError('config_invalid');
     const customs = result.customSources;
+    const scholarCustom = result.scholarCustomSources;
+    const factsCustom = result.factsCustomSources;
     if (input.searchProvider !== undefined && !isProvider(input.searchProvider, customs)) throw new SurfError('config_invalid');
     const providers = input.searchProviders ?? (input.searchProvider === undefined ? defaults.searchProviders : [input.searchProvider]);
     if (!Array.isArray(providers) || providers.length === 0 || providers.length > MAX_PROVIDERS ||
@@ -113,7 +125,7 @@ export function parseConfig(value: unknown): SurfConfig {
       if (entries.length > 8) throw new SurfError('config_invalid');
       const map: Record<string, number> = {};
       for (const [name, value] of entries) {
-        if (!isProvider(name, customs) && !isScholarSource(name) && !isFactSource(name)) throw new SurfError('config_invalid');
+        if (!isProvider(name, customs) && !isScholarSource(name, scholarCustom) && !isFactSource(name, factsCustom)) throw new SurfError('config_invalid');
         if (typeof value !== 'number' || !Number.isInteger(value) || value < 1000 || value > 60_000) throw new SurfError('config_invalid');
         map[name] = value;
       }
@@ -135,7 +147,7 @@ export function parseConfig(value: unknown): SurfConfig {
     }
     if (input.scholarSources !== undefined) {
       const list = input.scholarSources;
-      if (!Array.isArray(list) || list.length === 0 || list.length > 4 || !list.every(isScholarSource) ||
+      if (!Array.isArray(list) || list.length === 0 || list.length > 4 || !list.every(item => isScholarSource(item, scholarCustom)) ||
           new Set(list).size !== list.length) throw new SurfError('config_invalid');
       result.scholarSources = [...(list as ScholarSource[])];
     }
@@ -152,7 +164,7 @@ export function parseConfig(value: unknown): SurfConfig {
     }
     if (input.factsSources !== undefined) {
       const list = input.factsSources;
-      if (!Array.isArray(list) || list.length === 0 || list.length > 4 || !list.every(isFactSource) ||
+      if (!Array.isArray(list) || list.length === 0 || list.length > 4 || !list.every(item => isFactSource(item, factsCustom)) ||
           new Set(list).size !== list.length) throw new SurfError('config_invalid');
       result.factsSources = [...(list as FactSource[])];
     }
@@ -167,19 +179,23 @@ export function publicConfig(config: SurfConfig): PublicConfig {
   const { braveApiKey, anysearchApiKey, tavilyApiKey, exaApiKey, proxyUrl, ...rest } = config;
   return { ...rest, searchProviders: [...rest.searchProviders], searchProvider: rest.searchProviders[0],
     customSources: config.customSources.map(({ key, ...rest2 }) => ({ ...rest2, hasKey: Boolean(key) })),
+    scholarCustomSources: config.scholarCustomSources.map(({ key, ...rest2 }) => ({ ...rest2, hasKey: Boolean(key) })),
+    factsCustomSources: config.factsCustomSources.map(({ key, ...rest2 }) => ({ ...rest2, hasKey: Boolean(key) })),
     hasBraveApiKey: Boolean(braveApiKey), hasAnySearchApiKey: Boolean(anysearchApiKey),
     hasTavilyApiKey: Boolean(tavilyApiKey), hasExaApiKey: Boolean(exaApiKey), hasProxy: Boolean(proxyUrl) };
 }
 export function updateConfig(value: unknown, current: SurfConfig): SurfConfig {
   const input = { ...object(value) };
   // 自定义来源的 Key 不回传页面：留空表示沿用同名旧值，要换才写新的。
-  if (Array.isArray(input.customSources)) {
-    input.customSources = (input.customSources as unknown[]).map(raw => {
+  for (const field of ['customSources', 'scholarCustomSources', 'factsCustomSources'] as const) {
+    if (!Array.isArray(input[field])) continue;
+    const old = current[field];
+    input[field] = (input[field] as unknown[]).map(raw => {
       if (!raw || typeof raw !== 'object') return raw;
       const item = raw as Record<string, unknown>;
       if (item.key === undefined || item.key === '') {
-        const old = current.customSources.find(source => source.name === item.name);
-        if (old) return { ...item, key: old.key };
+        const previous = old.find(source => source.name === item.name);
+        if (previous) return { ...item, key: previous.key };
       }
       return raw;
     });

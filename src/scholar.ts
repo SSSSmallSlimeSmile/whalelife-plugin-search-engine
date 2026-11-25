@@ -3,24 +3,39 @@
  * Additional terms under AGPLv3 Section 7: see LICENSE-ADDITIONAL.
  */
 import { SurfError } from './errors.ts';
-import type { ScholarItem, ScholarSource } from './types.ts';
+import type { CustomSource, ScholarItem, ScholarSource } from './types.ts';
+import { buildCustomRequest, parseCustomScholar } from './custom.ts';
 
 /** 请求只需要 URL 和头；抓取、超时、回退一律走宿主那套 netwrok 层，这里不自己发请求。 */
-export interface ScholarRequest { url: string; headers: Record<string, string> }
+export interface ScholarRequest {
+  url: string; headers: Record<string, string>;
+  /** 自定义来源可能是 POST，内置四家一律是 GET。 */
+  method?: 'GET' | 'POST'; body?: string; allowRedirects?: boolean;
+}
 
 export const scholarSources: ScholarSource[] = ['arxiv', 'crossref', 'openalex', 'semanticscholar'];
 
-export function isScholarSource(value: unknown): value is ScholarSource {
-  return typeof value === 'string' && (scholarSources as string[]).includes(value);
+/** 自定义学术来源的名字统一挂 custom: 前缀，和内置四家共用一条回退链。 */
+export function isScholarSource(value: unknown, customs: CustomSource[] = []): value is ScholarSource {
+  if (typeof value !== 'string') return false;
+  if ((scholarSources as string[]).includes(value)) return true;
+  return value.startsWith('custom:') && customs.some(source => 'custom:' + source.name === value);
 }
 
 /**
  * 四个来源全是公开 API，不要 Key。Crossref 和 OpenAlex 只有填了联系邮箱才进 polite pool，
  * 拿不到就照常请求，只是配额低一点——不因为缺邮箱就拒绝。
  */
-export function buildRequest(source: ScholarSource, query: string, limit: number, mailto: string): ScholarRequest {
+export function buildRequest(source: ScholarSource, query: string, limit: number, mailto: string, customs: CustomSource[] = []): ScholarRequest {
   const q = query.trim();
   const rows = Math.min(20, Math.max(1, Math.trunc(limit)));
+  if (source.startsWith('custom:')) {
+    const found = customs.find(item => 'custom:' + item.name === source);
+    if (!found) throw new SurfError('search_unconfigured');
+    const request = buildCustomRequest(found, q, rows);
+    return { url: request.url, headers: request.headers, method: request.method,
+      ...(request.body ? { body: request.body } : {}), allowRedirects: false };
+  }
   if (source === 'arxiv') {
     const url = new URL('https://export.arxiv.org/api/query');
     url.searchParams.set('search_query', 'all:' + q.replace(/"/g, ' '));
@@ -244,7 +259,12 @@ function parseJson(body: Buffer): unknown {
   try { return JSON.parse(body.toString('utf8')); } catch { throw new SurfError('search_parse'); }
 }
 
-export function parseScholar(source: ScholarSource, body: Buffer, limit: number): ScholarItem[] {
+export function parseScholar(source: ScholarSource, body: Buffer, limit: number, customs: CustomSource[] = []): ScholarItem[] {
+  if (source.startsWith('custom:')) {
+    const found = customs.find(item => 'custom:' + item.name === source);
+    if (!found) throw new SurfError('search_unconfigured');
+    return parseCustomScholar(found.name, found, body, limit);
+  }
   if (source === 'arxiv') return parseArxiv(body, limit);
   if (source === 'crossref') return parseCrossref(body, limit);
   if (source === 'openalex') return parseOpenAlex(body, limit);

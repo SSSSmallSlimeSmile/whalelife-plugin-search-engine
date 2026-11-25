@@ -411,7 +411,8 @@ export class SurfRuntime implements SurfService {
       let sources = config.scholarSources;
       if (input.sources !== undefined) {
         const list = input.sources;
-        if (!Array.isArray(list) || list.length === 0 || list.length > 4 || !list.every(isScholarSource) ||
+        if (!Array.isArray(list) || list.length === 0 || list.length > 4 ||
+            !list.every(item => isScholarSource(item, config.scholarCustomSources)) ||
             new Set(list).size !== list.length) throw new SurfError('invalid_input');
         sources = [...list];
       }
@@ -439,13 +440,14 @@ export class SurfRuntime implements SurfService {
           const timeoutMs = this.sourceBudget(config, source, index, sources.length, remaining);
           limitSignal = AbortSignal.timeout(timeoutMs);
           const attemptSignal = AbortSignal.any([signal, limitSignal]);
-          const request = buildRequest(source, query, limit, config.scholarMailto);
+          const request = buildRequest(source, query, limit, config.scholarMailto, config.scholarCustomSources);
           const items: ScholarItem[] = await untilCancelled(attemptSignal, async () => {
             const response = await this.fetcher.get(request.url, { signal: attemptSignal, timeoutMs,
-              maxBytes: config.maxPageBytes, proxyUrl: config.proxyUrl, allowRedirects: true,
-              headers: request.headers });
+              maxBytes: config.maxPageBytes, proxyUrl: config.proxyUrl,
+              allowRedirects: request.allowRedirects ?? true, headers: request.headers,
+              ...(request.method ? { method: request.method } : {}), ...(request.body ? { body: request.body } : {}) });
             checkResponse(response.status);
-            return parseScholar(source, response.body, limit);
+            return parseScholar(source, response.body, limit, config.scholarCustomSources);
           });
           if (limitSignal.aborted || performance.now() - started >= timeoutMs) throw new SurfError('timeout');
           answered = true;
@@ -491,7 +493,8 @@ export class SurfRuntime implements SurfService {
       let sources = config.factsSources;
       if (input.sources !== undefined) {
         const list = input.sources;
-        if (!Array.isArray(list) || list.length === 0 || list.length > 4 || !list.every(isFactSource) ||
+        if (!Array.isArray(list) || list.length === 0 || list.length > 4 ||
+            !list.every(item => isFactSource(item, config.factsCustomSources)) ||
             new Set(list).size !== list.length) throw new SurfError('invalid_input');
         sources = [...list];
       }
@@ -519,13 +522,14 @@ export class SurfRuntime implements SurfService {
           const timeoutMs = this.sourceBudget(config, source, index, sources.length, remaining);
           limitSignal = AbortSignal.timeout(timeoutMs);
           const attemptSignal = AbortSignal.any([signal, limitSignal]);
-          const request = buildFactRequest(source, query, limit, lang);
+          const request = buildFactRequest(source, query, limit, lang, config.factsCustomSources);
           const items: FactItem[] = await untilCancelled(attemptSignal, async () => {
             const response = await this.fetcher.get(request.url, { signal: attemptSignal, timeoutMs,
-              maxBytes: config.maxPageBytes, proxyUrl: config.proxyUrl, allowRedirects: true,
-              headers: request.headers });
+              maxBytes: config.maxPageBytes, proxyUrl: config.proxyUrl,
+              allowRedirects: request.allowRedirects ?? true, headers: request.headers,
+              ...(request.method ? { method: request.method } : {}), ...(request.body ? { body: request.body } : {}) });
             checkResponse(response.status);
-            return parseFact(source, response.body, limit, lang);
+            return parseFact(source, response.body, limit, lang, config.factsCustomSources);
           });
           if (limitSignal.aborted || performance.now() - started >= timeoutMs) throw new SurfError('timeout');
           answered = true;
@@ -558,17 +562,19 @@ export class SurfRuntime implements SurfService {
     const started = performance.now();
     try {
       if (this.stopped || this.signal.aborted) throw new SurfError('stopped');
-      const source = isFactSource(input.source) ? input.source : this.config.factsSources[0];
+      const source = isFactSource(input.source, this.config.factsCustomSources) ? input.source : this.config.factsSources[0];
       const lang = input.lang === 'en' ? 'en' : this.config.factsLang;
       const budget = Math.min(this.config.timeoutMs, 15_000);
       const signal = AbortSignal.any([this.signal, AbortSignal.timeout(budget)]);
       const query = typeof input.query === 'string' && input.query.trim() ? input.query.trim().slice(0, 200) : 'Brisbane';
-      const request = buildFactRequest(source, query, 3, lang);
+      const request = buildFactRequest(source, query, 3, lang, this.config.factsCustomSources);
       const items = await untilCancelled(signal, async () => {
         const response = await this.fetcher.get(request.url, { signal, timeoutMs: budget,
-          maxBytes: this.config.maxPageBytes, proxyUrl: this.config.proxyUrl, allowRedirects: true, headers: request.headers });
+          maxBytes: this.config.maxPageBytes, proxyUrl: this.config.proxyUrl,
+          allowRedirects: request.allowRedirects ?? true, headers: request.headers,
+          ...(request.method ? { method: request.method } : {}), ...(request.body ? { body: request.body } : {}) });
         checkResponse(response.status);
-        return parseFact(source, response.body, 3, lang);
+        return parseFact(source, response.body, 3, lang, this.config.factsCustomSources);
       });
       const sample = items[0]?.title ? ' 首条：' + items[0].title.slice(0, 60) : '';
       return { ok: true, ms: Math.round(performance.now() - started), detail: items.length + ' 条结果' + sample };
@@ -582,17 +588,19 @@ export class SurfRuntime implements SurfService {
     const started = performance.now();
     try {
       if (this.stopped || this.signal.aborted) throw new SurfError('stopped');
-      const source = isScholarSource(input.source) ? input.source : this.config.scholarSources[0];
+      const source = isScholarSource(input.source, this.config.scholarCustomSources) ? input.source : this.config.scholarSources[0];
       const budget = Math.min(this.config.timeoutMs, 15_000);
       const signal = AbortSignal.any([this.signal, AbortSignal.timeout(budget)]);
       const query = typeof input.query === 'string' && input.query.trim() ? input.query.trim().slice(0, 200) : 'transformer';
-      const request = buildRequest(source, query, 3, this.config.scholarMailto);
+      const request = buildRequest(source, query, 3, this.config.scholarMailto, this.config.scholarCustomSources);
       const items = await untilCancelled(signal, async () => {
         const response = await this.fetcher.get(request.url, { signal, timeoutMs: budget,
-          maxBytes: this.config.maxPageBytes, proxyUrl: this.config.proxyUrl, allowRedirects: true, headers: request.headers });
+          maxBytes: this.config.maxPageBytes, proxyUrl: this.config.proxyUrl,
+          allowRedirects: request.allowRedirects ?? true, headers: request.headers,
+          ...(request.method ? { method: request.method } : {}), ...(request.body ? { body: request.body } : {}) });
         if (response.status < 200 || response.status > 299)
           throw new ProviderError([401, 403, 429, 503].includes(response.status) ? 'access_blocked' : 'http_error', upstreamDetail(response.body));
-        return parseScholar(source, response.body, 3);
+        return parseScholar(source, response.body, 3, this.config.scholarCustomSources);
       });
       const sample = items[0]?.title ? ' 首条：' + items[0].title.slice(0, 60) : '';
       return { ok: true, ms: Math.round(performance.now() - started), detail: items.length + ' 条结果' + sample };

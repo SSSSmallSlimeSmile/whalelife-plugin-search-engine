@@ -91,6 +91,10 @@ export const settingsPage = `<!doctype html>
 .src-grid.drag-on .src-card.on{border-color:rgba(124,92,255,.35)}
 .src-card.on::after{content:"✓";background:#7c5cff;border-color:#7c5cff;color:#fff}
 .src-card.on em{color:#15803d}
+.src-card.add{font:inherit;text-align:left;color:inherit;background:transparent;border-style:dashed}
+.src-card.add em{color:#7c5cff}
+.src-card .more{position:absolute;top:6px;right:28px;width:16px;height:16px;line-height:14px;text-align:center;font-style:normal;font-size:12px;color:#9aa0b0;border-radius:4px;cursor:pointer}
+.src-card .more:hover{background:rgba(124,92,255,.14);color:#7c5cff}
 .preset b{font-size:13px}
 .preset span{font-size:12px;color:#797e8c;line-height:1.45}
 .preset em{font-size:11px;color:#6d4aff;font-style:normal}
@@ -161,7 +165,11 @@ export const settingsPage = `<!doctype html>
 <label class="pg-row"><span class="pg-label">链接字段</span><input type="text" id="cLink" placeholder="url"></label>
 <label class="pg-row"><span class="pg-label">摘要字段（可空）</span><input type="text" id="cSnippet" placeholder="content"></label>
 </div>
-<div class="chain-add"><button class="btn" type="button" id="cProbe">探一下</button><button class="btn primary" type="button" id="cSave">加到列表</button><button class="btn" type="button" id="cCancel">取消</button><span class="chain-msg" id="cMsg"></span></div>
+<div class="pg-pair" id="cScholarOnly" hidden>
+<label class="pg-row"><span class="pg-label">作者字段（可空）</span><input type="text" id="cAuthors" placeholder="authors；认数组或 name/display_name"></label>
+<label class="pg-row"><span class="pg-label">年份字段（可空）</span><input type="text" id="cYear" placeholder="year"></label>
+</div>
+<div class="chain-add"><button class="btn" type="button" id="cProbe">探一下</button><button class="btn primary" type="button" id="cSave">加到列表</button><button class="btn" type="button" id="cDelete" hidden>删掉这个来源</button><button class="btn" type="button" id="cCancel">取消</button><span class="chain-msg" id="cMsg"></span></div>
 <p class="pg-hint">只收 http/https、不跟随跳转——查询串不会被重发到另一个域。字段只认点路径（a.b.c），不支持数组下标。地址里没有 {query} 会被拒。POST 会发 {query, limit} 的 JSON 体。Key 存盘后不回传页面，同名留空表示沿用原值。</p>
 </div>
 <input type="hidden" name="searchProviders" id="searchProviders">
@@ -251,6 +259,8 @@ export const settingsPage = `<!doctype html>
 <label class="src-card" draggable="true"><input type="checkbox" class="scholar-src" value="openalex"><b>OpenAlex</b><span>覆盖面最广，带被引数</span><em class="src-flag">未启用</em></label>
 <label class="src-card" draggable="true"><input type="checkbox" class="scholar-src" value="crossref"><b>Crossref</b><span>期刊注册库，DOI 最全</span><em class="src-flag">未启用</em></label>
 <label class="src-card" draggable="true"><input type="checkbox" class="scholar-src" value="semanticscholar"><b>Semantic Scholar</b><span>无 Key 时常报 429</span><em class="src-flag">未启用</em></label>
+<div id="scholarCustomCards" style="display:contents"></div>
+<button type="button" class="src-card add" id="scholarCustomNew"><b>+ 自定义来源</b><span>返回 JSON 的接口，跟内置几家共用这条回退链</span><em>点一下填接口</em></button>
 </div>
 <p class="pg-hint">前一个连不上才换下一个；连上但零条算应答，会记进回退链再试下一个。四个都不需要 Key。想临时换顺序或只查某一个，用工具参数 sources。</p></div>
 </div>
@@ -280,6 +290,8 @@ export const settingsPage = `<!doctype html>
 <label class="src-card" draggable="true"><input type="checkbox" class="fact-src" value="wikidata"><b>维基数据</b><span>实体、编号、一句描述</span><em class="src-flag">未启用</em></label>
 <label class="src-card" draggable="true"><input type="checkbox" class="fact-src" value="openlibrary"><b>OpenLibrary</b><span>图书、作者、首版年</span><em class="src-flag">未启用</em></label>
 <label class="src-card" draggable="true"><input type="checkbox" class="fact-src" value="oeis"><b>OEIS</b><span>整数数列，输入例如 1,2,3,6,11</span><em class="src-flag">未启用</em></label>
+<div id="factCustomCards" style="display:contents"></div>
+<button type="button" class="src-card add" id="factCustomNew"><b>+ 自定义来源</b><span>返回 JSON 的接口，跟内置几家共用这条回退链</span><em>点一下填接口</em></button>
 </div>
 <p class="pg-hint">前一个连不上才换下一个；连上但零条算应答，会记进回退链再试下一个。四家都不需要 Key。</p></div>
 </div>
@@ -437,7 +449,98 @@ byId("chain").addEventListener("drop", (event) => {
 });
 const MAX_SOURCES = 6;
 let customs = [];
+let scholarCustoms = [];
+let factCustoms = [];
 const CUSTOM_MAX = 8;
+/** 学术页、事实页各有一份自定义来源，字段结构跟搜索页那份一样（学术多作者/年份）。 */
+const KIND_CUSTOM = {
+  scholar: { box: "scholarCustomCards", add: "scholarCustomNew", cls: "scholar-src", sel: "scholarSrcSel", label: "学术" },
+  fact: { box: "factCustomCards", add: "factCustomNew", cls: "fact-src", sel: "factSrcSel", label: "事实" },
+};
+function kindList(scope) {
+  return scope === "scholar" ? scholarCustoms : scope === "fact" ? factCustoms : customs;
+}
+function kindSet(scope, list) {
+  if (scope === "scholar") scholarCustoms = list;
+  else if (scope === "fact") factCustoms = list;
+  else customs = list;
+}
+function renderKindCustoms(scope) {
+  const cfg = KIND_CUSTOM[scope];
+  const box = cfg && byId(cfg.box);
+  if (!box) return;
+  const checked = new Set([...document.querySelectorAll("." + cfg.cls)].filter(el => el.checked).map(el => el.value));
+  box.textContent = "";
+  const list = kindList(scope);
+  list.forEach((item, index) => {
+    const card = document.createElement("label");
+    card.className = "src-card";
+    card.draggable = true;
+    card.dataset.customScope = scope;
+    card.dataset.customIndex = String(index);
+    card.dataset.customName = item.name;
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.className = cfg.cls;
+    input.value = "custom:" + item.name;
+    input.checked = checked.has("custom:" + item.name);
+    const name = document.createElement("b");
+    name.textContent = item.name;
+    const desc = document.createElement("span");
+    desc.textContent = item.url + " · 数组 " + item.items;
+    const flag = document.createElement("em");
+    flag.className = "src-flag";
+    flag.textContent = "未启用";
+    const more = document.createElement("i");
+    more.className = "more";
+    more.title = "编辑";
+    more.textContent = "\u22ef";
+    card.append(input, name, desc, flag, more);
+    box.append(card);
+  });
+  const add = byId(cfg.add);
+  if (add) {
+    const em = add.querySelector("em");
+    if (list.length >= CUSTOM_MAX) { add.classList.add("blocked"); em.textContent = "最多 " + CUSTOM_MAX + " 条自定义，先删一条"; }
+    else { add.classList.remove("blocked"); em.textContent = "点一下填接口"; }
+  }
+  const sel = byId(cfg.sel);
+  if (sel) {
+    const head = [...sel.options].filter(option => !option.value.startsWith("custom:"));
+    sel.textContent = "";
+    for (const option of head) sel.append(option);
+    for (const item of list) {
+      const option = document.createElement("option");
+      option.value = "custom:" + item.name;
+      option.textContent = item.name + "（自定义）";
+      sel.append(option);
+    }
+  }
+  if (typeof syncSrcCards === "function") syncSrcCards();
+}
+for (const scope of ["scholar", "fact"]) {
+  const cfg = KIND_CUSTOM[scope];
+  const grid = byId(cfg.box)?.closest(".src-grid");
+  if (!grid) continue;
+  grid.addEventListener("click", (event) => {
+    const more = event.target.closest(".more");
+    if (!more) return;
+    const card = more.closest(".src-card");
+    if (!card || !card.dataset.customName) return;
+    event.preventDefault();
+    event.stopPropagation();
+    customForm(true, card, Number(card.dataset.customIndex), scope);
+  });
+  byId(cfg.add).onclick = () => {
+    const list = kindList(scope);
+    if (list.length >= CUSTOM_MAX) {
+      const add = byId(cfg.add);
+      add.querySelector("em").textContent = "最多 " + CUSTOM_MAX + " 条自定义，先删一条";
+      return;
+    }
+    customForm(true, byId(cfg.add), -1, scope);
+  };
+}
 const CUSTOM_NAME = /^[a-z0-9][a-z0-9_-]{0,23}$/;
 function renderCustoms() {
   const box = byId("customCards");
@@ -788,6 +891,10 @@ function show(data) {
   hasTavilyKey = Boolean(c.hasTavilyApiKey);
   hasExaKey = Boolean(c.hasExaApiKey);
   customs = (c.customSources || []).map(item => ({ ...item }));
+  scholarCustoms = (c.scholarCustomSources || []).map(item => ({ ...item }));
+  factCustoms = (c.factsCustomSources || []).map(item => ({ ...item }));
+  renderKindCustoms("scholar");
+  renderKindCustoms("fact");
   chain = [...c.searchProviders];
   timeouts = { ...(c.sourceTimeouts || {}) };
   renderChain();
@@ -833,6 +940,7 @@ async function load() {
 
 const CUSTOM_FIELDS = { cName: "name", cUrl: "url", cMethod: "method", cItems: "items", cTitle: "title", cLink: "link", cSnippet: "snippet", cKey: "key" };
 let customEdit = -1;
+let customScope = "web";
 function placeCustom(anchor) {
   const f = byId("customForm");
   const target = anchor || byId("customNew");
@@ -846,25 +954,31 @@ function placeCustom(anchor) {
   f.style.left = left + "px";
   f.style.top = top + "px";
 }
-function customForm(open, anchor, index) {
+function customForm(open, anchor, index, scope) {
   const f = byId("customForm");
   byId("cMsg").textContent = "";
   byId("cMsg").className = "chain-msg";
   if (!open) { f.hidden = true; customEdit = -1; return; }
+  customScope = KIND_CUSTOM[scope] ? scope : "web";
   const edit = typeof index === "number" ? index : -1;
   customEdit = edit;
-  const item = edit >= 0 ? customs[edit] : null;
+  const item = edit >= 0 ? kindList(customScope)[edit] : null;
   for (const [id, key] of Object.entries(CUSTOM_FIELDS)) byId(id).value = item ? (item[key] || "") : "";
+  byId("cAuthors").value = item && item.authors ? item.authors : "";
+  byId("cYear").value = item && item.year ? item.year : "";
   byId("cMethod").value = item && item.method === "POST" ? "POST" : "GET";
-  byId("customTitle").textContent = item ? "编辑来源 · " + item.name : "新自定义来源";
+  byId("cScholarOnly").hidden = customScope !== "scholar";
+  const where = customScope === "web" ? "" : "（" + KIND_CUSTOM[customScope].label + "页）";
+  byId("customTitle").textContent = (item ? "编辑来源 · " + item.name : "新自定义来源") + where;
   byId("cName").readOnly = Boolean(item);
   byId("cSave").textContent = item ? "保存修改" : "加到列表";
+  byId("cDelete").hidden = !(edit >= 0);
   placeCustom(anchor);
   byId("cName").focus({ preventScroll: true });
 }
 function openCustomEdit(index, card) {
   if (!(index >= 0) || !customs[index]) return;
-  customForm(true, card, index);
+  customForm(true, card, index, "web");
 }
 byId("customNew").onclick = () => {
   if (customs.length >= CUSTOM_MAX) { const m = byId("chainMsg"); m.className = "chain-msg err"; m.textContent = "自定义最多 " + CUSTOM_MAX + " 条，先删一条"; return; }
@@ -893,25 +1007,55 @@ byId("cProbe").onclick = async () => {
     msg.textContent = "请求失败：" + (error && error.message ? error.message : error);
   }
 };
+function allCustomNames(exceptScope, exceptIndex) {
+  const names = [];
+  for (const scope of ["web", "scholar", "fact"]) {
+    kindList(scope).forEach((item, index) => {
+      if (scope === exceptScope && index === exceptIndex) return;
+      names.push(item.name);
+    });
+  }
+  return names;
+}
 byId("cSave").onclick = () => {
   const msg = byId("cMsg");
   const draft = {};
   for (const [id, key] of Object.entries(CUSTOM_FIELDS)) draft[key] = byId(id).value.trim();
+  const scholarField = customScope === "scholar"
+    ? { authors: byId("cAuthors").value.trim(), year: byId("cYear").value.trim() } : {};
   if (!CUSTOM_NAME.test(draft.name)) { msg.className = "chain-msg err"; msg.textContent = "名字只能是小写字母、数字、下划线、连字符，1–24 位"; return; }
-  if (customs.some((item, i) => i !== customEdit && item.name === draft.name)) { msg.className = "chain-msg err"; msg.textContent = "已经有同名的自定义来源"; return; }
+  if (allCustomNames(customScope, customEdit).includes(draft.name)) { msg.className = "chain-msg err"; msg.textContent = "已经有同名的自定义来源（三个页签共用一个命名空间）"; return; }
   if (!/^https?:[/][/]/i.test(draft.url) || !draft.url.includes("{query}")) { msg.className = "chain-msg err"; msg.textContent = "地址要以 http(s):// 开头，并且带 {query}"; return; }
   if (!draft.items || !draft.title || !draft.link) { msg.className = "chain-msg err"; msg.textContent = "结果数组、标题字段、链接字段都要填"; return; }
   const editing = customEdit;
-  if (editing >= 0) {
-    const old = customs[editing].name;
-    customs[editing] = draft;
-    if (chain.includes("custom:" + old)) chain[chain.indexOf("custom:" + old)] = "custom:" + draft.name;
-  } else customs.push(draft);
-  renderChain();
+  const list = kindList(customScope).slice();
+  const merged = { ...draft, ...scholarField };
+  if (!merged.authors) delete merged.authors;
+  if (!merged.year) delete merged.year;
+  if (editing >= 0) list[editing] = merged;
+  else list.push(merged);
+  kindSet(customScope, list);
+  renderKindCustoms(customScope);
+  if (customScope === "web") renderChain();
   customForm(false);
-  const ok = byId("chainMsg");
+  const ok = byId(customScope === "web" ? "chainMsg" : customScope === "scholar" ? "scholarMsg" : "factMsg");
   ok.className = "chain-msg ok";
-  ok.textContent = (editing >= 0 ? "已改好：" : "已加进列表：") + draft.name + "，点它加进来源链，再点右上「保存」";
+  ok.textContent = (editing >= 0 ? "已改好：" : "已加进列表：") + draft.name
+    + (customScope === "web" ? "，点它加进来源链" : "，勾上它才会进回退链") + "，再点右上「保存」";
+};
+byId("cDelete").onclick = () => {
+  const scope = customScope;
+  if (customEdit < 0) return;
+  const list = kindList(scope).slice();
+  const gone = list[customEdit] ? list[customEdit].name : "";
+  list.splice(customEdit, 1);
+  kindSet(scope, list);
+  renderKindCustoms(scope);
+  if (scope === "web") { chain = chain.filter(item => item !== "custom:" + gone); renderChain(); }
+  customForm(false);
+  const ok = byId(scope === "web" ? "chainMsg" : scope === "scholar" ? "scholarMsg" : "factMsg");
+  ok.className = "chain-msg ok";
+  ok.textContent = "已删掉自定义来源 " + gone + "，记得点右上「保存」";
 };
 byId("refresh").onclick = load;
 byId("scholarProbe").onclick = async () => {
@@ -957,8 +1101,16 @@ byId("f").onsubmit = async (event) => {
   config.maxImageBytes = Number(byId("imageKiB").value) * 1024;
   for (const id of ["braveApiKey", "anysearchApiKey", "tavilyApiKey", "exaApiKey", "proxyUrl"]) config[id] = byId(id).value;
   for (const id of ["clearBraveApiKey", "clearAnySearchApiKey", "clearTavilyApiKey", "clearExaApiKey", "clearProxy"]) config[id] = byId(id).checked;
-  config.customSources = customs.map(item => ({ name: item.name, url: item.url, method: item.method,
-    items: item.items, title: item.title, link: item.link, snippet: item.snippet || "", key: item.key || "" }));
+  const plainCustom = item => ({ name: item.name, url: item.url, method: item.method,
+    items: item.items, title: item.title, link: item.link, snippet: item.snippet || "", key: item.key || "" });
+  config.customSources = customs.map(plainCustom);
+  config.scholarCustomSources = scholarCustoms.map(item => {
+    const base = plainCustom(item);
+    if (item.authors) base.authors = item.authors;
+    if (item.year) base.year = item.year;
+    return base;
+  });
+  config.factsCustomSources = factCustoms.map(plainCustom);
   config.structuredRead = byId("structuredRead").checked;
   config.scholarEnabled = byId("scholarEnabled").checked;
   config.scholarMailto = byId("scholarMailto").value.trim();

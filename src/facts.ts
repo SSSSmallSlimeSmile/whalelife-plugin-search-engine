@@ -2,15 +2,24 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  * Additional terms under AGPLv3 Section 7: see LICENSE-ADDITIONAL.
  */
-import type { FactItem, FactSource } from './types.ts';
+import type { CustomSource, FactItem, FactSource } from './types.ts';
+import { buildCustomRequest, parseCustomFact } from './custom.ts';
+import { SurfError } from './errors.ts';
 
 /** 请求只需要 URL 和头；抓取、超时、DNS 校验一律走宿主网络层，这里不自己发请求。 */
-export interface FactRequest { url: string; headers: Record<string, string> }
+export interface FactRequest {
+  url: string; headers: Record<string, string>;
+  /** 自定义来源可能是 POST。 */
+  method?: 'GET' | 'POST'; body?: string; allowRedirects?: boolean;
+}
 
 export const factSources: FactSource[] = ['wikipedia', 'wikidata', 'openlibrary', 'oeis'];
 
-export function isFactSource(value: unknown): value is FactSource {
-  return typeof value === 'string' && (factSources as string[]).includes(value);
+/** 自定义事实来源同样挂 custom: 前缀；名字在不在由配置里的列表说了算。 */
+export function isFactSource(value: unknown, customs: CustomSource[] = []): value is FactSource {
+  if (typeof value !== 'string') return false;
+  if ((factSources as string[]).includes(value)) return true;
+  return value.startsWith('custom:') && customs.some(source => 'custom:' + source.name === value);
 }
 
 /**
@@ -18,10 +27,17 @@ export function isFactSource(value: unknown): value is FactSource {
  * 事实源和网页搜索不是一回事：它返回的是「条目」，查询语义是「这个东西叫什么」，
  * 所以不并进 searchProviders 的回退链——连上零条在那里算应答，会把后面的源全挡死。
  */
-export function buildFactRequest(source: FactSource, query: string, limit: number, lang: string): FactRequest {
+export function buildFactRequest(source: FactSource, query: string, limit: number, lang: string, customs: CustomSource[] = []): FactRequest {
   const q = query.trim();
   const rows = Math.min(20, Math.max(1, Math.trunc(limit)));
   const headers: Record<string, string> = { Accept: 'application/json' };
+  if (source.startsWith('custom:')) {
+    const found = customs.find(item => 'custom:' + item.name === source);
+    if (!found) throw new SurfError('search_unconfigured');
+    const request = buildCustomRequest(found, q, rows);
+    return { url: request.url, headers: request.headers, method: request.method,
+      ...(request.body ? { body: request.body } : {}), allowRedirects: false };
+  }
   if (source === 'wikipedia') {
     const code = lang === 'zh' ? 'zh' : 'en';
     const url = new URL(`https://${code}.wikipedia.org/w/api.php`);
@@ -98,8 +114,13 @@ function wikiUrl(lang: string, title: string): string {
  * 解析成统一的 items。四家字段差别大，但对外只给 title / url / snippet / meta 四样，
  * 免得调用方为了读结果先学四套结构。
  */
-export function parseFact(source: FactSource, body: Buffer | string, limit: number, lang: string): FactItem[] {
+export function parseFact(source: FactSource, body: Buffer | string, limit: number, lang: string, customs: CustomSource[] = []): FactItem[] {
   const text = typeof body === 'string' ? body : body.toString('utf8');
+  if (source.startsWith('custom:')) {
+    const found = customs.find(item => 'custom:' + item.name === source);
+    if (!found) throw new SurfError('search_unconfigured');
+    return parseCustomFact(found.name, found, Buffer.from(text, 'utf8'), limit);
+  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);

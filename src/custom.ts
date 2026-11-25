@@ -2,8 +2,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  * Additional terms under AGPLv3 Section 7: see LICENSE-ADDITIONAL.
  */
-import { SurfError } from './errors.ts';
-import type { CustomSource, SearchItem } from './types.ts';
+import { ProviderError, SurfError } from './errors.ts';
+import type { CustomSource, FactItem, FactSource, ScholarItem, ScholarSource, SearchItem } from './types.ts';
 
 /** 用户自己填的 JSON 来源：只解析点路径，不去认别人的 HTML 类名。 */
 const MAX_URL = 4096;
@@ -30,6 +30,24 @@ function safeUrl(raw: unknown): string | undefined {
     url.hash = '';
     return url.href;
   } catch { return; }
+}
+
+/** 来源返回 200 但结构不对时，把它自己给出的原因带进回执，别只说认不出。
+ * 这是外部内容，只当资料：压成一行、去掉控制字符、截断。 */
+function jsonErrorDetail(payload: unknown): string {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return '';
+  const record = payload as Record<string, unknown>;
+  const raw = record.error ?? record.message ?? record.detail ?? record.errors;
+  let text = '';
+  if (typeof raw === 'string') text = raw;
+  else if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    const inner = raw as Record<string, unknown>;
+    for (const key of ['info', 'message', 'code', 'detail']) {
+      if (typeof inner[key] === 'string' && inner[key]) { text = inner[key] as string; break; }
+    }
+  } else if (Array.isArray(raw) && typeof raw[0] === 'string') text = raw[0] as string;
+  const clean = text.replace(/[\x00-\x1f\x7f]/g, ' ').replace(/\s+/g, ' ').trim();
+  return clean.slice(0, 200);
 }
 
 function pick(root: unknown, path: string): unknown {
@@ -64,7 +82,7 @@ export function parseCustom(source: CustomSource, body: Buffer, limit: number): 
   let payload: unknown;
   try { payload = JSON.parse(body.toString('utf8')); } catch { throw new SurfError('search_parse'); }
   const list = pick(payload, source.items);
-  if (!Array.isArray(list)) throw new SurfError('search_parse');
+  if (!Array.isArray(list)) throw new ProviderError('search_parse', jsonErrorDetail(payload));
   const results: SearchItem[] = [];
   const seen = new Set<string>();
   for (const raw of list) {
@@ -109,4 +127,77 @@ export function guessJsonShape(body: Buffer): JsonShapeGuess {
     snippet: pickOf(['content', 'description', 'desc', 'snippet', 'summary', 'text', 'abstract']),
     fields, count: fields.length,
   };
+}
+
+/** 学术页的自定义来源：字段比网页多作者和年份，取不到就留空，不猜。 */
+export function parseCustomScholar(name: string, source: CustomSource, body: Buffer, limit: number): ScholarItem[] {
+  let payload: unknown;
+  try { payload = JSON.parse(body.toString("utf8")); } catch { throw new SurfError("search_parse"); }
+  const list = pick(payload, source.items);
+  if (!Array.isArray(list)) throw new ProviderError("search_parse", jsonErrorDetail(payload));
+  const items: ScholarItem[] = [];
+  const seen = new Set<string>();
+  for (const raw of list) {
+    if (!raw || typeof raw !== "object") continue;
+    const url = safeUrl(pick(raw, source.link));
+    const title = flat(pick(raw, source.title), 300) || url || "";
+    if (!title || seen.has(title)) continue;
+    seen.add(title);
+    const authors = source.authors ? authorList(pick(raw, source.authors)) : [];
+    const year = source.year ? yearOf(pick(raw, source.year)) : undefined;
+    items.push({
+      source: ("custom:" + name) as ScholarSource,
+      title,
+      authors,
+      ...(year !== undefined ? { year } : {}),
+      ...(url ? { url } : {}),
+      abstract: source.snippet ? flat(pick(raw, source.snippet), 500) : "",
+    });
+    if (items.length >= limit) break;
+  }
+  return items;
+}
+
+/** 作者字段可能是字符串、字符串数组，也可能是 {name} 这种对象数组；认不出就返回空。 */
+function authorList(value: unknown): string[] {
+  const out: string[] = [];
+  const take = (item: unknown) => {
+    if (typeof item === "string") { const text = flat(item, 80); if (text) out.push(text); return; }
+    if (item && typeof item === "object") {
+      const record = item as Record<string, unknown>;
+      for (const key of ["name", "display_name", "title", "text"]) {
+        const text = flat(record[key], 80);
+        if (text) { out.push(text); return; }
+      }
+    }
+  };
+  if (Array.isArray(value)) { for (const item of value) { take(item); if (out.length >= 6) break; } }
+  else take(value);
+  return out.slice(0, 6);
+}
+
+function yearOf(value: unknown): number | undefined {
+  const number = typeof value === "number" ? value : typeof value === "string" ? Number(value.slice(0, 4)) : NaN;
+  return Number.isFinite(number) && number >= 1000 && number <= 3000 ? Math.trunc(number) : undefined;
+}
+
+/** 事实页的自定义来源：只给标题、链接、摘要三样。 */
+export function parseCustomFact(name: string, source: CustomSource, body: Buffer, limit: number): FactItem[] {
+  let payload: unknown;
+  try { payload = JSON.parse(body.toString("utf8")); } catch { throw new SurfError("search_parse"); }
+  const list = pick(payload, source.items);
+  if (!Array.isArray(list)) throw new ProviderError("search_parse", jsonErrorDetail(payload));
+  const items: FactItem[] = [];
+  const seen = new Set<string>();
+  for (const raw of list) {
+    if (!raw || typeof raw !== "object") continue;
+    const url = safeUrl(pick(raw, source.link));
+    const title = flat(pick(raw, source.title), 300) || url || "";
+    if (!title || !url || seen.has(url)) continue;
+    seen.add(url);
+    items.push({ source: ("custom:" + name) as FactSource, title, url,
+      snippet: source.snippet ? flat(pick(raw, source.snippet), 400) : "" });
+    if (items.length >= limit) break;
+  }
+  return items;
 }
