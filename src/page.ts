@@ -31,9 +31,10 @@ export const settingsPage = `<!doctype html>
 #msg{font-size:13px;color:#797e8c}
 #msg.err{color:#b91c1c}
 .chain{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px}
-.chain-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:6px 8px;padding:8px 10px;border:1px solid rgba(127,127,127,.28);border-radius:9px;background:rgba(127,127,127,.04);font-size:13px;cursor:grab}
+.chain-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:6px 8px;padding:8px 10px;border:1px solid rgba(124,92,255,.45);border-radius:9px;background:rgba(124,92,255,.06);box-shadow:0 0 0 1px rgba(124,92,255,.18),0 2px 10px rgba(124,92,255,.14),0 0 16px rgba(124,92,255,.10);font-size:13px;cursor:grab}
+.chain-row:hover{box-shadow:0 0 0 1px rgba(124,92,255,.55),0 3px 14px rgba(124,92,255,.24),0 0 22px rgba(124,92,255,.20)}
 .chain-row.drag{opacity:.45}
-.chain-row.over{border-color:#7c5cff;box-shadow:0 0 0 3px rgba(124,92,255,.12)}
+.chain-row.over{border-color:#7c5cff;box-shadow:0 0 0 3px rgba(124,92,255,.3),0 0 22px rgba(124,92,255,.26)}
 .chain-row .grip{color:#9aa0b0;letter-spacing:-1px;user-select:none}
 .chain-row b{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chain-row em{font-style:normal;font-size:12px;color:#9aa0b0}
@@ -80,13 +81,20 @@ export const settingsPage = `<!doctype html>
 .src-card span{font-size:12px;color:#797e8c;line-height:1.45}
 .src-card em{font-size:11px;font-style:normal;color:#9aa0b0}
 .src-card::after{content:"";position:absolute;top:9px;right:10px;width:14px;height:14px;border:1px solid rgba(127,127,127,.45);border-radius:4px;line-height:14px;text-align:center;font-size:10px}
-.src-card.on{border-color:#7c5cff;background:rgba(124,92,255,.06);box-shadow:0 0 0 3px rgba(124,92,255,.10)}
+.src-card[draggable="true"]{cursor:grab}
+.src-card[draggable="true"]{padding-left:24px}
+.src-card[draggable="true"]::before{content:"\u2261";position:absolute;left:8px;top:8px;font-size:12px;line-height:1;color:#9aa0b0}
+.src-card.drag{opacity:.45}
+.src-card.over{border-color:#7c5cff;background:rgba(124,92,255,.10)}
+.src-card.on{border-color:#7c5cff;background:rgba(124,92,255,.07);box-shadow:0 0 0 1px rgba(124,92,255,.55),0 2px 10px rgba(124,92,255,.26),0 0 18px rgba(124,92,255,.20)}
+.src-card.on:hover{box-shadow:0 0 0 1px rgba(124,92,255,.7),0 3px 14px rgba(124,92,255,.34),0 0 24px rgba(124,92,255,.28)}
+.src-grid.drag-on .src-card.on{box-shadow:0 0 0 1px rgba(124,92,255,.35),0 0 10px rgba(124,92,255,.12)}
 .src-card.on::after{content:"✓";background:#7c5cff;border-color:#7c5cff;color:#fff}
 .src-card.on em{color:#15803d}
 .preset b{font-size:13px}
 .preset span{font-size:12px;color:#797e8c;line-height:1.45}
 .preset em{font-size:11px;color:#6d4aff;font-style:normal}
-.preset.on{opacity:.55;cursor:default;border-style:dashed}
+.preset.on{cursor:default;border-color:rgba(124,92,255,.45);background:rgba(124,92,255,.06);box-shadow:0 0 0 1px rgba(124,92,255,.18),0 2px 10px rgba(124,92,255,.12),0 0 14px rgba(124,92,255,.09)}
 .preset.on em{color:#15803d}
 .preset.blocked{opacity:.55;cursor:not-allowed}
 .preset.blocked em{color:#b45309}
@@ -231,10 +239,10 @@ export const settingsPage = `<!doctype html>
 <div class="pg-pair">
 <div class="pg-item"><span class="pg-label">来源（勾选即启用，按这里列出的顺序回退）</span>
 <div class="src-grid">
-<label class="src-card"><input type="checkbox" class="scholar-src" value="arxiv"><b>arXiv</b><span>预印本，全文免费，只有 XML</span><em class="src-flag">未启用</em></label>
-<label class="src-card"><input type="checkbox" class="scholar-src" value="openalex"><b>OpenAlex</b><span>覆盖面最广，带被引数</span><em class="src-flag">未启用</em></label>
-<label class="src-card"><input type="checkbox" class="scholar-src" value="crossref"><b>Crossref</b><span>期刊注册库，DOI 最全</span><em class="src-flag">未启用</em></label>
-<label class="src-card"><input type="checkbox" class="scholar-src" value="semanticscholar"><b>Semantic Scholar</b><span>无 Key 时常报 429</span><em class="src-flag">未启用</em></label>
+<label class="src-card" draggable="true"><input type="checkbox" class="scholar-src" value="arxiv"><b>arXiv</b><span>预印本，全文免费，只有 XML</span><em class="src-flag">未启用</em></label>
+<label class="src-card" draggable="true"><input type="checkbox" class="scholar-src" value="openalex"><b>OpenAlex</b><span>覆盖面最广，带被引数</span><em class="src-flag">未启用</em></label>
+<label class="src-card" draggable="true"><input type="checkbox" class="scholar-src" value="crossref"><b>Crossref</b><span>期刊注册库，DOI 最全</span><em class="src-flag">未启用</em></label>
+<label class="src-card" draggable="true"><input type="checkbox" class="scholar-src" value="semanticscholar"><b>Semantic Scholar</b><span>无 Key 时常报 429</span><em class="src-flag">未启用</em></label>
 </div>
 <p class="pg-hint">前一个连不上才换下一个；连上但零条算应答，会记进回退链再试下一个。四个都不需要 Key。想临时换顺序或只查某一个，用工具参数 sources。</p></div>
 </div>
@@ -260,10 +268,10 @@ export const settingsPage = `<!doctype html>
 <div class="pg-pair">
 <div class="pg-item"><span class="pg-label">来源（勾选即启用，按这里列出的顺序回退）</span>
 <div class="src-grid">
-<label class="src-card"><input type="checkbox" class="fact-src" value="wikipedia"><b>维基百科</b><span>条目搜索，带摘要</span><em class="src-flag">未启用</em></label>
-<label class="src-card"><input type="checkbox" class="fact-src" value="wikidata"><b>维基数据</b><span>实体、编号、一句描述</span><em class="src-flag">未启用</em></label>
-<label class="src-card"><input type="checkbox" class="fact-src" value="openlibrary"><b>OpenLibrary</b><span>图书、作者、首版年</span><em class="src-flag">未启用</em></label>
-<label class="src-card"><input type="checkbox" class="fact-src" value="oeis"><b>OEIS</b><span>整数数列，输入例如 1,2,3,6,11</span><em class="src-flag">未启用</em></label>
+<label class="src-card" draggable="true"><input type="checkbox" class="fact-src" value="wikipedia"><b>维基百科</b><span>条目搜索，带摘要</span><em class="src-flag">未启用</em></label>
+<label class="src-card" draggable="true"><input type="checkbox" class="fact-src" value="wikidata"><b>维基数据</b><span>实体、编号、一句描述</span><em class="src-flag">未启用</em></label>
+<label class="src-card" draggable="true"><input type="checkbox" class="fact-src" value="openlibrary"><b>OpenLibrary</b><span>图书、作者、首版年</span><em class="src-flag">未启用</em></label>
+<label class="src-card" draggable="true"><input type="checkbox" class="fact-src" value="oeis"><b>OEIS</b><span>整数数列，输入例如 1,2,3,6,11</span><em class="src-flag">未启用</em></label>
 </div>
 <p class="pg-hint">前一个连不上才换下一个；连上但零条算应答，会记进回退链再试下一个。四家都不需要 Key。</p></div>
 </div>
@@ -298,13 +306,51 @@ function hasKeyFor(name) {
   return true;
 }
 function syncSrcCards() {
-  for (const card of document.querySelectorAll(".src-card")) {
-    const box = card.querySelector("input[type=checkbox]");
-    if (!box) continue;
-    card.classList.toggle("on", box.checked);
-    const flag = card.querySelector(".src-flag");
-    if (flag) flag.textContent = box.checked ? "已启用" : "未启用";
+  for (const grid of document.querySelectorAll(".src-grid")) {
+    let order = 0;
+    for (const card of grid.querySelectorAll(".src-card")) {
+      const box = card.querySelector("input[type=checkbox]");
+      if (!box) continue;
+      card.classList.toggle("on", box.checked);
+      const flag = card.querySelector(".src-flag");
+      if (box.checked) order += 1;
+      if (flag) flag.textContent = box.checked ? ("已启用 \u00b7 #" + order) : "未启用";
+    }
   }
+}
+// 学术 / 事实的来源支持拖动排序：拖到哪张卡上就插到它前面，DOM 顺序就是保存顺序。
+for (const grid of document.querySelectorAll(".src-grid")) {
+  grid.addEventListener("dragstart", (event) => {
+    const card = event.target.closest(".src-card");
+    if (!card || !card.draggable) return;
+    event.dataTransfer.setData("text/plain", "card");
+    event.dataTransfer.effectAllowed = "move";
+    card.classList.add("drag");
+    grid.classList.add("drag-on");
+  });
+  grid.addEventListener("dragend", () => {
+    for (const item of grid.querySelectorAll(".over, .drag")) item.classList.remove("over", "drag");
+    grid.classList.remove("drag-on");
+  });
+  grid.addEventListener("dragover", (event) => {
+    const card = event.target.closest(".src-card");
+    if (!card) return;
+    event.preventDefault();
+    for (const item of grid.querySelectorAll(".over")) if (item !== card) item.classList.remove("over");
+    card.classList.add("over");
+  });
+  grid.addEventListener("drop", (event) => {
+    const card = event.target.closest(".src-card");
+    if (!card) return;
+    event.preventDefault();
+    card.classList.remove("over");
+    const moving = grid.querySelector(".src-card.drag");
+    if (!moving || moving === card) return;
+    const box = card.getBoundingClientRect();
+    const after = event.clientX > box.left + box.width / 2;
+    if (after) card.after(moving); else card.before(moving);
+    syncSrcCards();
+  });
 }
 document.addEventListener("change", (event) => {
   const tag = event.target;
