@@ -139,6 +139,7 @@ export interface SearchInput {
 export interface ReadInput { url?: string; pageRef?: string; offset?: number }
 export interface ImageInput { pageRef: string; imageIndex: number }
 export interface SurfStatus {
+  /** 读盘配置校验失败时的原因；平时不出现。 */ configError?: string;
   version: '1.0.0'; ready: boolean; vision: boolean; gallery: boolean; configValid: boolean;
   searchProvider: SearchProvider; searchProviders: SearchProvider[]; activeRequests: number;
 }

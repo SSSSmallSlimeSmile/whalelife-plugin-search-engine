@@ -198,6 +198,7 @@ export class SurfRuntime implements SurfService {
   private now: () => number;
   private transient: boolean;
   private configValid: boolean;
+  private configError = '';
   private stopped = false;
   private active = 0;
   private pages = new Map<string, StoredPage>();
@@ -209,15 +210,17 @@ export class SurfRuntime implements SurfService {
   private galleryAborter = new AbortController();
   private collectionOffers = new Map<string, StoredCollectionOffer>();
   private collectionRequests = new Set<string>();
-  constructor(config: SurfConfig, fetcher: PublicFetcher, options: { signal: AbortSignal; transient: boolean; configValid: boolean; now?: () => number }) {
+  constructor(config: SurfConfig, fetcher: PublicFetcher, options: { signal: AbortSignal; transient: boolean; configValid: boolean; configError?: string; now?: () => number }) {
     this.config = structuredClone(config); this.fetcher = fetcher; this.now = options.now ?? Date.now;
     this.signal = AbortSignal.any([options.signal, this.aborter.signal]);
     this.transient = options.transient; this.configValid = options.configValid;
+    this.configError = options.configError ?? '';
   }
   /** 保存设置后立刻把新配置交给运行时，不用重载插件。 */
   setConfig(next: SurfConfig) {
     this.config = structuredClone(next);
     this.configValid = true;
+    this.configError = '';
     this.cache.clear();
     this.health.clear();
   }
@@ -233,7 +236,8 @@ export class SurfRuntime implements SurfService {
   status(): SurfStatus {
     return { version: '1.0.0', ready: !this.stopped && !this.signal.aborted && this.transient && this.configValid,
       configValid: this.configValid, vision: this.visionAvailable(), gallery: this.galleryAvailable(),
-      searchProvider: this.config.searchProviders[0], searchProviders: [...this.config.searchProviders], activeRequests: this.active };
+      searchProvider: this.config.searchProviders[0], searchProviders: [...this.config.searchProviders], activeRequests: this.active,
+      ...(this.configError ? { configError: this.configError } : {}) };
   }
   settings() { return publicConfig(this.config); }
   private visionAvailable() { return !this.stopped && !this.signal.aborted && Boolean(this.vision && !this.vision.signal.aborted); }

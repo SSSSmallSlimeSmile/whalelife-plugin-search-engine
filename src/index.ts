@@ -5,7 +5,7 @@
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { Context, PluginHandler, ToolSession, TransientToolOutput } from 'whalelife';
 import { defaults, parseConfig, publicConfig, updateConfig, object } from './config.ts';
-import { SurfError, safeError } from './errors.ts';
+import { ProviderError, SurfError, safeError } from './errors.ts';
 import { createPublicFetcher } from './network.ts';
 import { SurfRuntime } from './runtime.ts';
 import { settingsPage } from './page.ts';
@@ -17,12 +17,15 @@ export async function apply(ctx: Context) { return applyWithDependencies(ctx, {}
 
 /** Trusted composition seam for isolated tests; not exposed as a model tool or HTTP endpoint. */
 export async function applyWithDependencies(ctx: Context, dependencies: Dependencies = {}) {
-  let config: SurfConfig = { ...defaults }, configValid = true, pendingReload = false;
-  try { config = parseConfig(await ctx.config.read()); } catch { configValid = false; }
+  let config: SurfConfig = { ...defaults }, configValid = true, configError = '', pendingReload = false;
+  try { config = parseConfig(await ctx.config.read()); } catch (error) {
+    configValid = false;
+    configError = error instanceof SurfError ? error.message : '';
+  }
   if (ctx.signal.aborted) return;
   const transient = typeof ctx.tools.registerTransient === 'function';
   const runtime = new SurfRuntime(config, dependencies.fetcher ?? createPublicFetcher(), {
-    signal: ctx.signal, transient, configValid, now: dependencies.now,
+    signal: ctx.signal, transient, configValid, configError, now: dependencies.now,
   });
   let saving = Promise.resolve();
   ctx.effect(() => async () => { await runtime.dispose(); await saving.catch(() => {}); });
@@ -258,7 +261,8 @@ export async function applyWithDependencies(ctx: Context, dependencies: Dependen
   ctx.web.api('/plugins/search-engine/api', wrap(async (req, res, { signal }) => {
     if (req.method !== 'POST') { res.statusCode = 405; res.end(); return; }
     const expected = expectedTokenDigest;
-    if (!expected) throw new SurfError('api_disabled');
+    if (!expected) throw new ProviderError('api_disabled', runtime.status().configError
+      ? `读配置失败，整份回退到默认值，令牌因此为空：${runtime.status().configError}` : '');
     const authorizationCount = req.headersDistinct?.authorization?.length
       ?? req.rawHeaders?.filter((name, index) => index % 2 === 0 && name.toLowerCase() === 'authorization').length;
     if (authorizationCount !== undefined && authorizationCount !== 1) throw new SurfError('api_unauthorized');

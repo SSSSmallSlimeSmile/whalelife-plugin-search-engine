@@ -18,6 +18,7 @@ export const settingsPage = `<!doctype html>
 .panel-body .pg-pair:last-child{margin-bottom:0}
 .panel-body .pg-pair>.pg-item:only-child{grid-column:1/-1}
 .panel-body .pg-item{min-width:0}
+.pg-warn{margin:0;padding:10px 16px;background:#fff5e6;border-bottom:1px solid #f0d9b5;color:#8a5b13;font-size:12.5px;line-height:1.6}
 .panel-body .pg-hint{margin:10px 0 0;font-size:12px;line-height:1.65;color:#797e8c}
 .panel-body .pg-ro{display:grid;grid-template-columns:150px 1fr;gap:16px;margin:14px 0;font-size:13px;align-items:baseline}
 .panel-body .pg-ro b{font-weight:600;color:#797e8c}
@@ -145,6 +146,7 @@ export const settingsPage = `<!doctype html>
 <button type="button" class="pg-tab" data-goto="search">搜索</button>
 <button type="button" class="pg-tab" data-goto="read">读取</button>
 </div><div class="pg-actions"><button class="btn" type="button" id="refresh">重新读取</button><button class="btn primary" type="submit" form="f" id="save" disabled>保存</button><span id="msg"></span></div></div>
+<div class="pg-warn" id="cfgWarn" hidden></div>
 <div class="panel-body"><form id="f">
 
 <section class="pg-group" id="pg-source">
@@ -1075,6 +1077,10 @@ byId("probeVertical").onclick = () => {
 function show(data) {
   const c = data.config;
   revision = data.revision;
+  const cfgError = (data.status && data.status.configError) || "";
+  const warnBox = byId("cfgWarn");
+  warnBox.hidden = !cfgError;
+  warnBox.textContent = cfgError ? "读配置失败，整份配置已退回默认值（令牌因此为空、对外接口关着）：" + cfgError + "。先按这条改好再保存，不然会把默认值写回去。" : "";
   hasBraveKey = Boolean(c.hasBraveApiKey);
   hasTavilyKey = Boolean(c.hasTavilyApiKey);
   hasExaKey = Boolean(c.hasExaApiKey);

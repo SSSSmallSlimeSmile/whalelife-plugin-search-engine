@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  * Additional terms under AGPLv3 Section 7: see LICENSE-ADDITIONAL.
  */
-import { SurfError } from './errors.ts';
+import { ProviderError, SurfError } from './errors.ts';
 import type { CustomSource, FactSource, PublicConfig, ScholarSource, SearchProvider, SearchZone, SurfConfig } from './types.ts';
 import { isScholarSource } from './scholar.ts';
 import { isFactSource } from './facts.ts';
@@ -86,46 +86,58 @@ function isZone(value: unknown): value is SearchZone {
   return value === 'cn' || value === 'intl';
 }
 export function parseConfig(value: unknown): SurfConfig {
+  let field = '';
   try {
     const input = object(value), result = { ...defaults };
-    if (Object.keys(input).some(key => key !== 'searchProvider' && !Object.hasOwn(defaults, key))) throw new SurfError('config_invalid');
+    const unknownKey = Object.keys(input).find(key => key !== 'searchProvider' && !Object.hasOwn(defaults, key));
+    if (unknownKey !== undefined) throw new ProviderError('config_invalid', `未知字段「${unknownKey}」。`);
+    field = 'customSources';
     if (input.customSources !== undefined) result.customSources = parseCustomSources(input.customSources);
+    field = 'scholarCustomSources';
     if (input.scholarCustomSources !== undefined) result.scholarCustomSources = parseCustomSources(input.scholarCustomSources);
+    field = 'factsCustomSources';
     if (input.factsCustomSources !== undefined) result.factsCustomSources = parseCustomSources(input.factsCustomSources);
     // 三个列表的名字共用一个命名空间：custom:名字 出现在哪条链上必须没有歧义。
     const everyName = [...result.customSources, ...result.scholarCustomSources, ...result.factsCustomSources].map(source => source.name);
-    if (new Set(everyName).size !== everyName.length) throw new SurfError('config_invalid');
+    if (new Set(everyName).size !== everyName.length) throw new ProviderError('config_invalid', '三个自定义来源列表里有重名。');
     const customs = result.customSources;
     const scholarCustom = result.scholarCustomSources;
     const factsCustom = result.factsCustomSources;
+    field = 'searchProvider';
     if (input.searchProvider !== undefined && !isProvider(input.searchProvider, customs)) throw new SurfError('config_invalid');
+    field = 'searchProviders';
     const providers = input.searchProviders ?? (input.searchProvider === undefined ? defaults.searchProviders : [input.searchProvider]);
     if (!Array.isArray(providers) || providers.length === 0 || providers.length > MAX_PROVIDERS ||
         !providers.every(item => isProvider(item, customs)) || new Set(providers).size !== providers.length || input.searchProviders === null)
       throw new SurfError('config_invalid');
     result.searchProviders = [...providers];
+    field = 'anysearchZone';
     if (input.anysearchZone !== undefined) {
       if (!isZone(input.anysearchZone)) throw new SurfError('config_invalid');
       result.anysearchZone = input.anysearchZone;
     }
     for (const [key, , max] of secrets) {
       if (input[key] === undefined) continue;
+      field = key;
       const raw = input[key];
       if (typeof raw !== 'string' || raw.length > max || /[\x00-\x20\x7f]/.test(raw)) throw new SurfError('config_invalid');
       result[key] = raw;
     }
+    field = 'apiToken';
     if (input.apiToken !== undefined) {
       const token = input.apiToken;
       if (typeof token !== 'string' || token.length > 128 || (token !== '' && !/^[A-Za-z0-9_-]{16,128}$/.test(token)))
         throw new SurfError('config_invalid');
       result.apiToken = token;
     }
+    field = 'proxyUrl';
     if (result.proxyUrl) {
       const proxy = new URL(result.proxyUrl);
       if (!['http:', 'https:'].includes(proxy.protocol) || proxy.pathname !== '/' || proxy.search || proxy.hash || !proxy.hostname)
         throw new SurfError('config_invalid');
       result.proxyUrl = proxy.href;
     }
+    field = 'sourceTimeouts';
     if (input.sourceTimeouts !== undefined) {
       const raw = input.sourceTimeouts;
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new SurfError('config_invalid');
@@ -140,6 +152,7 @@ export function parseConfig(value: unknown): SurfConfig {
       result.sourceTimeouts = map;
     }
     // 级别与权重：tier 决定“一级 / 二级”，weight 只决定分多少字。二级自己不再挂回退。
+    field = 'providerTiers';
     if (input.providerTiers !== undefined) {
       const raw = input.providerTiers;
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new SurfError('config_invalid');
@@ -153,6 +166,7 @@ export function parseConfig(value: unknown): SurfConfig {
       }
       result.providerTiers = map;
     }
+    field = 'providerWeights';
     if (input.providerWeights !== undefined) {
       const raw = input.providerWeights;
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new SurfError('config_invalid');
@@ -166,6 +180,7 @@ export function parseConfig(value: unknown): SurfConfig {
       }
       result.providerWeights = map;
     }
+    field = 'providerFallbacks';
     if (input.providerFallbacks !== undefined) {
       const raw = input.providerFallbacks;
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new SurfError('config_invalid');
@@ -182,28 +197,34 @@ export function parseConfig(value: unknown): SurfConfig {
     }
     for (const key of Object.keys(limits) as (keyof typeof limits)[]) {
       if (input[key] === undefined) continue;
+      field = key;
       const value = input[key], [low, high] = limits[key];
       if (typeof value !== 'number' || !Number.isInteger(value) || value < low || value > high) throw new SurfError('config_invalid');
       result[key] = value;
     }
+    field = 'searchMode';
     if (input.searchMode !== undefined) {
       if (input.searchMode !== 'fallback' && input.searchMode !== 'aggregate' && input.searchMode !== 'hybrid') throw new SurfError('config_invalid');
       result.searchMode = input.searchMode;
     }
+    field = 'structuredRead';
     if (input.structuredRead !== undefined) {
       if (typeof input.structuredRead !== 'boolean') throw new SurfError('config_invalid');
       result.structuredRead = input.structuredRead;
     }
+    field = 'scholarEnabled';
     if (input.scholarEnabled !== undefined) {
       if (typeof input.scholarEnabled !== 'boolean') throw new SurfError('config_invalid');
       result.scholarEnabled = input.scholarEnabled;
     }
+    field = 'scholarSources';
     if (input.scholarSources !== undefined) {
       const list = input.scholarSources;
       if (!Array.isArray(list) || list.length === 0 || list.length > 5 || !list.every(item => isScholarSource(item, scholarCustom)) ||
           new Set(list).size !== list.length) throw new SurfError('config_invalid');
       result.scholarSources = [...(list as ScholarSource[])];
     }
+    field = 'scholarMailto';
     if (input.scholarMailto !== undefined) {
       const mail = input.scholarMailto;
       if (typeof mail !== 'string' || mail.length > 200 || /[\x00-\x20\x7f]/.test(mail) ||
@@ -211,22 +232,28 @@ export function parseConfig(value: unknown): SurfConfig {
         throw new SurfError('config_invalid');
       result.scholarMailto = mail;
     }
+    field = 'factsEnabled';
     if (input.factsEnabled !== undefined) {
       if (typeof input.factsEnabled !== 'boolean') throw new SurfError('config_invalid');
       result.factsEnabled = input.factsEnabled;
     }
+    field = 'factsSources';
     if (input.factsSources !== undefined) {
       const list = input.factsSources;
       if (!Array.isArray(list) || list.length === 0 || list.length > 4 || !list.every(item => isFactSource(item, factsCustom)) ||
           new Set(list).size !== list.length) throw new SurfError('config_invalid');
       result.factsSources = [...(list as FactSource[])];
     }
+    field = 'factsLang';
     if (input.factsLang !== undefined) {
       if (input.factsLang !== 'zh' && input.factsLang !== 'en') throw new SurfError('config_invalid');
       result.factsLang = input.factsLang;
     }
     return result;
-  } catch { throw new SurfError('config_invalid'); }
+  } catch (error) {
+    if (error instanceof ProviderError) throw error;
+    throw new ProviderError('config_invalid', field ? `字段「${field}」的值不合法。` : '');
+  }
 }
 export function publicConfig(config: SurfConfig): PublicConfig {
   const { braveApiKey, anysearchApiKey, tavilyApiKey, exaApiKey, proxyUrl, semanticScholarApiKey, apiToken, ...rest } = config;
