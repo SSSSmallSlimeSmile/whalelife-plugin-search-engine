@@ -89,8 +89,8 @@ export function parseConfig(value: unknown): SurfConfig {
   let field = '';
   try {
     const input = object(value), result = { ...defaults };
-    const unknownKey = Object.keys(input).find(key => key !== 'searchProvider' && !Object.hasOwn(defaults, key));
-    if (unknownKey !== undefined) throw new ProviderError('config_invalid', `未知字段「${unknownKey}」。`);
+    if (Object.keys(input).some(key => key !== 'searchProvider' && !Object.hasOwn(defaults, key)))
+      throw new ProviderError('config_invalid', '存在未知字段。');
     field = 'customSources';
     if (input.customSources !== undefined) result.customSources = parseCustomSources(input.customSources);
     field = 'scholarCustomSources';
