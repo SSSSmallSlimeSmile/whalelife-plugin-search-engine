@@ -73,8 +73,8 @@ export const settingsPage = `<!doctype html>
 .keypop .kp-head b{font-size:13px}
 .keypop .kp-head span{font-size:11px;color:#797e8c}
 .keypop input{width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid rgba(127,127,127,.34);border-radius:7px;font-size:13px;font-family:inherit}
-.keypop .kp-actions{display:flex;gap:6px;margin-top:9px}
-.keypop .kp-actions button{padding:4px 10px;font-size:12px;border:1px solid rgba(127,127,127,.34);border-radius:7px;background:transparent;color:inherit;cursor:pointer;font-family:inherit}
+.keypop .kp-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+.keypop .kp-actions button{white-space:nowrap;padding:4px 10px;font-size:12px;border:1px solid rgba(127,127,127,.34);border-radius:7px;background:transparent;color:inherit;cursor:pointer;font-family:inherit}
 .keypop .kp-actions button.primary{background:#7c5cff;border-color:#7c5cff;color:#fff}
 .keypop .kp-msg{margin-top:7px;font-size:11px;color:#797e8c;min-height:1em}
 .keypop .kp-msg.err{color:#b91c1c}
@@ -180,7 +180,7 @@ export const settingsPage = `<!doctype html>
 <div class="pg-item"><input type="password" name="anysearchApiKey" id="anysearchApiKey" autocomplete="new-password"><p class="pg-hint" id="anyState"></p><input id="clearAnySearchApiKey" type="checkbox" name="clearAnySearchApiKey"></div>
 </div>
 
-<p class="pg-hint">拖 ≡ 或点 ↑ ↓ 调整顺序，前一个失败才换下一个；第一个来源拿剩余预算的七成。「试一下」直连该来源一次，不改配置、不写回执。brave / tavily / exa 各要自己的 Key——点卡片右上角「⋯」打开设置（可拖动），没填 Key 的卡片会灰着；anysearch、github、huggingface 不带 Key 就能用。代理在「代理设置」里。</p></div>
+<p class="pg-hint">拖 ≡ 调整顺序（可跨一级/二级），前一个失败才换下一个；第一个来源拿剩余预算的七成。「试一下」直连该来源一次，不改配置、不写回执。brave / tavily / exa 各要自己的 Key——点卡片右上角「⋯」打开设置（可拖动），没填 Key 的卡片会灰着；anysearch、github、huggingface 不带 Key 就能用。代理在「代理设置」里。</p></div>
 </div>
 <div class="pg-pair">
 <div class="pg-item"><label class="pg-row"><span class="pg-label">每次默认结果数</span><input type="number" name="resultsLimit" id="resultsLimit" min="1" max="10" required></label>
@@ -493,9 +493,7 @@ function renderRow(name, index) {
   weight.addEventListener("change", () => { weights[name] = Number(weight.value); });
   const btns = document.createElement("span"); btns.className = "chain-btns";
   const mk = (text, act, disabled) => { const b = document.createElement("button"); b.type = "button"; b.textContent = text; b.dataset.act = act; b.dataset.name = name; b.disabled = Boolean(disabled); return b; };
-  const at = list.indexOf(name);
-  btns.append(mk("\u2191", "up", at === 0), mk("\u2193", "down", at === list.length - 1),
-    mk("\u5220\u9664", "del", chain.length <= 1), mk("\u8bd5\u4e00\u4e0b", "probe", false));
+  btns.append(mk("\u5220\u9664", "del", chain.length <= 1), mk("\u8bd5\u4e00\u4e0b", "probe", false));
   const msg = document.createElement("span"); msg.className = "chain-msg"; btns.append(msg);
   row.append(grip, label, weight, order, btns);
   return row;
@@ -515,14 +513,6 @@ function renderChain() {
   byId("searchProviders").value = chain.join(", ");
   renderCustoms();
   renderPresets();
-}
-function moveWithin(name, delta) {
-  const list = groupsOf(tierOf(name));
-  const at = list.indexOf(name), to = at + delta;
-  if (to < 0 || to >= list.length) return;
-  const left = chain.indexOf(list[at]), right = chain.indexOf(list[to]);
-  [chain[left], chain[right]] = [chain[right], chain[left]];
-  renderChain();
 }
 function moveTo(name, target, after) {
   if (name === target) return;
@@ -544,9 +534,7 @@ TIER_BOX.addEventListener("click", (event) => {
   if (!button) return;
   const name = button.dataset.name;
   const act = button.dataset.act;
-  if (act === "up") moveWithin(name, -1);
-  else if (act === "down") moveWithin(name, 1);
-  else if (act === "del") {
+  if (act === "del") {
     chain = chain.filter(item => item !== name);
     delete tiers[name]; delete weights[name]; delete fallbacks[name];
     renderChain();
