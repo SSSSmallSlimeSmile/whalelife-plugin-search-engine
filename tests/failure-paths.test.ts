@@ -43,7 +43,8 @@ function deferred<T>() {
 
 test('web result budget keeps an intact prefix and caches the drop count', async () => {
   let calls = 0;
-  const skeleton = JSON.stringify([{ ...results[0], snippet: '' }]).length;
+  // 结果现在带 via / domain，骨架长度要把这两项算进去，否则预算算出来的期望值会偏。
+  const skeleton = JSON.stringify([{ ...results[0], snippet: '', via: 'api', domain: 'example.org' }]).length;
   const surf = runtime(async url => { calls++; return reply(url, { results }); });
   for (const [budget, expected] of [[1, ''], [skeleton + 2, 'A'], [skeleton + 5, 'A😀"']] as const) {
     surf.setConfig({ ...base, resultsMaxChars: budget });

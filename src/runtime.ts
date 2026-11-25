@@ -14,7 +14,7 @@ import { buildRequest, parseScholar, isScholarSource } from './scholar.ts';
 import { buildFactRequest, parseFact, isFactSource } from './facts.ts';
 import { detectStructured, fetchStructured } from './structured.ts';
 import type { PublicFetcher, SurfConfig, SurfService, SurfStatus, OperationResult, ParsedPage,
-  SearchData, SearchFailure, SearchItem, SearchProvider, SearchZone, PageData, ImageData, GalleryImageData, SearchInput, ReadInput, ImageInput, CallOptions, VisionService, GalleryService,
+  SearchData, SearchFailure, SearchItem, SearchProvider, SearchZone, SourceKind, PageData, ImageData, GalleryImageData, SearchInput, ReadInput, ImageInput, CallOptions, VisionService, GalleryService,
   ScholarData, ScholarInput, ScholarItem,
   FactData, FactInput, FactFailure, FactItem } from './types.ts';
 
@@ -22,6 +22,27 @@ type StoredPage = ParsedPage & { sessionId: string; url: string; expires: number
 type StoredOffer = { sessionId: string; binding: OptionalService<VisionService>; media: ImageData; expires: number };
 type StoredCollectionOffer = { sessionId: string; binding: OptionalService<GalleryService>; media: GalleryImageData; expires: number };
 const PAGE_CHUNK = 6000;
+/**
+ * 这条结果是怎么来的。官方 JSON 接口回来的字段是可预期的；解析对方页面回来的，人家改一次版就变形；
+ * 自定义来源由使用者自己填的映射决定，出错只有自己知道。这层标记让读结果的人能分出轻重，
+ * 而不是靠标题猜。
+ */
+function kindOf(provider: SearchProvider): SourceKind {
+  if (provider.startsWith('custom:')) return 'custom';
+  return provider === 'bing' || provider === 'duckduckgo' ? 'html' : 'api';
+}
+/** 给每条结果盖上 via 与 domain。域名叫不出名字就只盖 via，不编一个。 */
+function annotate(results: SearchItem[], provider: SearchProvider): SearchItem[] {
+  const via = kindOf(provider);
+  return results.map(item => {
+    let domain: string | undefined;
+    try {
+      const host = new URL(item.url).hostname.replace(/^www\./i, '').toLowerCase();
+      if (host) domain = host;
+    } catch { /* 相对地址或坏 URL：不盖 domain */ }
+    return domain ? { ...item, via, domain } : { ...item, via };
+  });
+}
 /**
  * 结果总量上限：按序列化后的长度算（JSON.stringify），不是字数。
  * 十条各带一千字摘要，就是一万字进上下文，之后每轮重发——这里给它一个刹车。
@@ -353,8 +374,8 @@ export class SurfRuntime implements SurfService {
             continue;
           }
           this.noteSourceSuccess(provider);
-          const trimmed = trimResults(results, config.resultsMaxChars);
-          const found: SearchData = { provider, results: trimmed.results, untrusted: true, elapsedMs: Math.round(performance.now() - started),
+          const trimmed = trimResults(annotate(results, provider), config.resultsMaxChars);
+          const found: SearchData = { provider, sourceKind: kindOf(provider), results: trimmed.results, untrusted: true, elapsedMs: Math.round(performance.now() - started),
             ...(trimmed.truncated ? { truncated: trimmed.truncated } : {}),
             ...(fallback.length ? { fallback } : {}), ...(notes.length ? { notes } : {}) };
           this.cachePut(config, signal, cacheKey, found);

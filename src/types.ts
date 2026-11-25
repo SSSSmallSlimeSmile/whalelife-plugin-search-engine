@@ -81,7 +81,14 @@ export interface ParsedPage {
   title: string; text: string; links: WebLink[]; images: WebImage[];
   totalTextChars: number; truncated: boolean; notice?: string;
 }
-export interface SearchItem { title: string; url: string; snippet: string }
+export type SourceKind = 'api' | 'html' | 'custom';
+export interface SearchItem {
+  title: string; url: string; snippet: string;
+  /** 这条结果是怎么来的：api（官方 JSON 接口）/ html（解析对方页面）/ custom（自定义来源）。 */
+  via?: SourceKind;
+  /** 链接的主机名，去掉 www.；URL 解析失败时不出现。用来核对条目域名跟它自称的机构是否一致。 */
+  domain?: string;
+}
 export interface CallOptions { signal?: AbortSignal }
 export interface SearchInput {
   query: string; limit?: number;
@@ -139,6 +146,8 @@ export interface FactData {
 export interface SearchFailure { provider: SearchProvider; elapsedMs: number; code: string; reason: string }
 export interface SearchData {
   provider: string; results: SearchItem[]; untrusted: true; elapsedMs: number;
+  /** 采用的那家来源属于哪一类；见 SearchItem.via。 */
+  sourceKind?: SourceKind;
   /** 因总量上限被丢掉的条目数；没丢就不出现这个字段。 */
   truncated?: number;
   fallback?: SearchFailure[];

@@ -73,6 +73,28 @@ API Key 与带凭据代理仅在本插件后端配置中保存，设置页只显
 
 只作用于 `search_web`。学术和事实返回的是结构化条目（摘要通常短），暂未套这一层。
 
+## 来源元数据
+
+每条结果除了标题、链接、摘要，还带两个字段：
+
+- `via`：这条是怎么来的。`api` = 对方公开 JSON 接口（anysearch / brave / tavily / exa / github / huggingface）；`html` = 解析对方搜索页面（duckduckgo / bing）；`custom` = 自定义来源，字段映射由使用者自己填
+- `domain`：链接的主机名，去掉 `www.`；URL 解析不出来时这个字段不出现，不编一个
+
+顶层另有 `sourceKind`，就是这一家用的是哪一类。
+
+为什么加：原先只知道「这条来自哪家」，不知道「这条有多可信」。`html` 那类是照对方页面结构抓的，对方改一次版就变形——可能是抓空，也可能是把页面别处的字当成摘要。分了类，才知道一条摘要读着不对劲该怀疑谁。
+
+`domain` 用来对号：条目自称是哪个机构，域名是不是那个机构。
+
+实测两次真搜索：
+
+```
+anysearch   sourceKind=api   via=api    domain=github.com / space.langbot.app / blog.csdn.net
+duckduckgo  sourceKind=html  via=html   domain=handbook.modular.com / learn.microsoft.com
+```
+
+只作用于 `search_web`。学术和事实的条目本来就有 `source` 字段说明来自哪一家。
+
 ## 来源冷却
 
 一个来源超时之后，下一次查询又会把同样的预算花在它身上——如果它正处在半死状态（对端限流、DNS 抽风、连接卡在建连），就是拿预算反复撞同一堵墙。
