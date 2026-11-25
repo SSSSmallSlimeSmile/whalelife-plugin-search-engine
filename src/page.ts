@@ -35,13 +35,17 @@ export const settingsPage = `<!doctype html>
 @media(max-width:820px){.chain{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:560px){.chain{grid-template-columns:minmax(0,1fr)}}
 .chain-row.primary{border-width:2px}
-.chain-zone{border:1px dashed #dcdfe6;border-radius:10px;padding:8px 10px;margin-top:8px}
+.chain-zone{border:1px dashed #dcdfe6;border-radius:10px;padding:6px 10px;margin-top:6px}
+.chain-zone.empty{padding:3px 10px;flex-direction:row;align-items:baseline;gap:8px;flex-wrap:wrap}
+.chain-zone.empty>ul{display:none}
+.chain-zone.empty>.tier-tag{margin:0}
 .chain-zone.over{border-color:#7c5cff;background:rgba(124,92,255,.04)}
 .chain-zone>.tier-tag{display:block;font-size:12px;color:#7a8090;margin-bottom:4px}
 .chain-zone>.tier-note{display:block;font-size:12px;color:#9aa0b0;margin-top:4px;font-style:normal}
+.chain-zone.empty>.tier-note{margin:0}
 .chain-row .chain-weight{justify-self:end;font-size:12px;padding:2px 2px;max-width:74px}
-.chain-standby{grid-column:1/-1;display:flex;align-items:center;gap:6px;flex-wrap:nowrap;margin:6px 0 0;padding:5px 8px;border:1px dashed rgba(124,92,255,.45);border-radius:9px;background:rgba(124,92,255,.03);font-size:12px;color:#797e8c}
-.chain-standby select{font-size:12px;padding:2px 4px;max-width:110px;min-width:0;flex:1 1 auto}
+.chain-standby{grid-column:1/-1;display:flex;align-items:center;gap:4px;flex-wrap:nowrap;margin:4px 0 0;padding:1px 6px;border:1px dashed rgba(124,92,255,.45);border-radius:9px;background:rgba(124,92,255,.03);font-size:12px;color:#797e8c}
+.chain-standby select{font-size:12px;padding:0 3px;max-width:96px;min-width:0;flex:0 1 auto;line-height:18px}
 .chain-standby em{font-style:normal;color:#9aa0b0}
 .chain-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:6px 8px;padding:8px 10px;border:1px solid rgba(124,92,255,.45);border-radius:9px;background:rgba(124,92,255,.06);box-shadow:0 0 0 1px rgba(124,92,255,.18),0 2px 10px rgba(124,92,255,.14),0 0 16px rgba(124,92,255,.10);font-size:13px;cursor:grab}
 .chain-row:hover{box-shadow:0 0 0 1px rgba(124,92,255,.55),0 3px 14px rgba(124,92,255,.24),0 0 22px rgba(124,92,255,.20)}
@@ -438,20 +442,20 @@ function standbyRow(name) {
   const li = document.createElement("div");
   li.className = "chain-standby";
   const text = document.createElement("span");
-  text.textContent = "没结果就用";
+  text.textContent = "回退";
   const sel = document.createElement("select");
   sel.id = "chainStandby";
   const opts = standbyChoices(name);
-  sel.innerHTML = '<option value="">（不设，就空着）</option>'
+  sel.innerHTML = '<option value="">不设</option>'
     + opts.map(item => '<option value="' + item + '">' + item + '</option>').join("");
   const saved = fallbacks[name] || "";
   sel.value = opts.includes(saved) ? saved : "";
   const hint = document.createElement("em");
-  hint.textContent = opts.length ? "" : "链上其它来源都在并发里，没有可选的二级";
+  hint.textContent = opts.length ? "" : "链上都在并发，没得选";
   sel.addEventListener("change", () => {
     if (sel.value) fallbacks[name] = sel.value;
     else delete fallbacks[name];
-    hint.textContent = "已记下，点右上「保存」生效";
+    hint.textContent = "已记下";
   });
   li.append(text, sel, hint);
   li.title = "主位没拿到结果时，换这个来源再打一次";
@@ -508,8 +512,11 @@ function renderChain() {
     if (name === first) row.append(standbyRow(name));
     (tierOf(name) === 2 ? two : one).append(row);
   });
-  byId("tierNote1").textContent = groupsOf(1).length ? "" : "一级还空着，从下面拖一张进来";
-  byId("tierNote2").textContent = groupsOf(2).length ? "" : "空着也行：二级只在你想要便宜兜底时才用";
+  const g1 = groupsOf(1).length, g2 = groupsOf(2).length;
+  one.closest(".chain-zone").classList.toggle("empty", !g1);
+  two.closest(".chain-zone").classList.toggle("empty", !g2);
+  byId("tierNote1").textContent = g1 ? "" : "一级还空着，从下面拖一张进来";
+  byId("tierNote2").textContent = g2 ? "" : "空着也行，只在想要便宜兜底时才用";
   byId("searchProviders").value = chain.join(", ");
   renderCustoms();
   renderPresets();
