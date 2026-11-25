@@ -185,6 +185,10 @@ export const settingsPage = `<!doctype html>
 <p class="pg-hint">搜索、读页、取图共用这个额度，超出直接回 busy。</p></div>
 </div>
 <div class="pg-pair">
+<div class="pg-item"><label class="pg-row"><span class="pg-label">结果缓存（秒）</span><input type="number" name="cacheSeconds" id="cacheSeconds" min="0" max="3600" required></label><p class="pg-hint">同样的词、同样的来源链，这个时间内直接回上次拿到的那份，不再发请求；0 = 不缓存。只缓存有结果的，失败和零条都会重新去问。上限 3600。</p></div>
+<div class="pg-item"><span class="pg-label">命中时会看到什么</span><p class="pg-hint" style="margin-top:0">回执里带 cached: true 和 cachedAgoMs：这次没发请求，结果是 N 毫秒前那次拿到的。来源链、Key、代理一改，缓存整表清空。</p></div>
+</div>
+<div class="pg-pair">
 <div class="pg-item"><span class="pg-label">垂直搜索参数</span>
 <p class="pg-hint" style="margin-top:0">tag 走 AnySearch 的垂直频道，多数还要配 params。实测可用的两组：tag=finance.quote + params { type: 'stock' }；tag=security.vuln + params { type: 'cve', value: 'CVE-2024-3094' }。zone 是 cn / intl，language 例如 zh-CN、en。这些都按次传入，这里不设默认值；不传 zone 就用上面那个区域。</p></div>
 </div>
@@ -720,7 +724,7 @@ function show(data) {
   chain = [...c.searchProviders];
   timeouts = { ...(c.sourceTimeouts || {}) };
   renderChain();
-  for (const id of ["resultsLimit", "concurrency", "maxTextChars", "referenceTtlSeconds"]) byId(id).value = c[id];
+  for (const id of ["resultsLimit", "concurrency", "maxTextChars", "referenceTtlSeconds", "cacheSeconds"]) byId(id).value = c[id];
   byId("anysearchZone").value = c.anysearchZone;
   byId("timeoutSeconds").value = c.timeoutMs / 1000;
   byId("pageKiB").value = c.maxPageBytes / 1024;
@@ -874,7 +878,7 @@ byId("factProbe").onclick = async () => {
 byId("f").onsubmit = async (event) => {
   event.preventDefault();
   const config = {};
-  for (const id of ["resultsLimit", "concurrency", "maxTextChars", "referenceTtlSeconds"]) config[id] = Number(byId(id).value);
+  for (const id of ["resultsLimit", "concurrency", "maxTextChars", "referenceTtlSeconds", "cacheSeconds"]) config[id] = Number(byId(id).value);
   config.searchProviders = chain.slice();
   config.sourceTimeouts = { ...timeouts };
   config.anysearchZone = byId("anysearchZone").value;

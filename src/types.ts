@@ -34,6 +34,8 @@ export interface SurfConfig {
   timeoutMs: number;
   /** 每个来源单独的上限（毫秒）。没写的来源按整体预算分配。 */
   sourceTimeouts: Record<string, number>;
+  /** 成功结果的缓存秒数，0 = 不缓存。三种搜索共用这个值。 */
+  cacheSeconds: number;
   maxPageBytes: number;
   maxImageBytes: number;
   maxTextChars: number;
@@ -108,6 +110,7 @@ export interface ScholarData {
   source: string; items: ScholarItem[]; untrusted: true; elapsedMs: number;
   fallback?: SearchFailure[];
   notes?: string[];
+  cached?: boolean; cachedAgoMs?: number;
 }
 export type FactSource = 'wikipedia' | 'wikidata' | 'openlibrary' | 'oeis';
 export interface FactInput {
@@ -125,6 +128,7 @@ export interface FactData {
   source: string; items: FactItem[]; untrusted: true; elapsedMs: number;
   fallback?: FactFailure[];
   notes?: string[];
+  cached?: boolean; cachedAgoMs?: number;
 }
 export interface SearchFailure { provider: SearchProvider; elapsedMs: number; code: string; reason: string }
 export interface SearchData {
@@ -132,6 +136,8 @@ export interface SearchData {
   fallback?: SearchFailure[];
   /** Per-call notes: which sources ignored tag/zone/language, and why. */
   notes?: string[];
+  /** 命中缓存时带这两项：这次没发请求，结果是 N 毫秒前那次拿到的。 */
+  cached?: boolean; cachedAgoMs?: number;
 }
 export interface PageData {
   pageRef: string; url: string; title: string; text: string; offset: number;

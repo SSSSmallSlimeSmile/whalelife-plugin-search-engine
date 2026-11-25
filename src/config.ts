@@ -11,7 +11,7 @@ export const defaults: SurfConfig = {
   searchProviders: ['bing'], braveApiKey: '', tavilyApiKey: '', exaApiKey: '', anysearchApiKey: '', anysearchZone: 'cn',
   proxyUrl: '', timeoutMs: 20_000, sourceTimeouts: {},
   maxPageBytes: 2 * 1024 * 1024, maxImageBytes: 8 * 1024 * 1024,
-  maxTextChars: 60_000, resultsLimit: 5, referenceTtlSeconds: 600, concurrency: 3,
+  maxTextChars: 60_000, resultsLimit: 5, referenceTtlSeconds: 600, concurrency: 3, cacheSeconds: 300,
   scholarEnabled: false, scholarSources: ['arxiv', 'openalex', 'crossref'], scholarMailto: '',
   factsEnabled: false, factsSources: ['wikipedia', 'wikidata', 'openlibrary', 'oeis'], factsLang: 'zh',
   customSources: [],
@@ -23,7 +23,7 @@ export function object(input: unknown): Record<string, unknown> {
 const limits = {
   timeoutMs: [1000, 60_000], maxPageBytes: [65536, 4 * 1024 * 1024],
   maxImageBytes: [65536, 16 * 1024 * 1024], maxTextChars: [1000, 100_000],
-  resultsLimit: [1, 10], referenceTtlSeconds: [30, 1800], concurrency: [1, 8],
+  resultsLimit: [1, 10], referenceTtlSeconds: [30, 1800], concurrency: [1, 8], cacheSeconds: [0, 3600],
 } as const;
 const secrets = [
   ['braveApiKey', 'clearBraveApiKey', 512],

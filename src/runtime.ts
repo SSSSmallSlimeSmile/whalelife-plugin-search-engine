@@ -93,6 +93,7 @@ export class SurfRuntime implements SurfService {
   private pages = new Map<string, StoredPage>();
   private offers = new Map<string, StoredOffer>();
   private imageRequests = new Set<string>();
+  private cache = new Map<string, { expires: number; at: number; value: unknown }>();
   private vision?: OptionalService<VisionService>;
   private gallery?: OptionalService<GalleryService>;
   private galleryAborter = new AbortController();
@@ -107,6 +108,7 @@ export class SurfRuntime implements SurfService {
   setConfig(next: SurfConfig) {
     this.config = { ...next, searchProviders: [...next.searchProviders], scholarSources: [...next.scholarSources] };
     this.configValid = true;
+    this.cache.clear();
   }
   setVision(binding: OptionalService<VisionService> | undefined) {
     if (this.vision !== binding) this.offers.clear();
@@ -144,10 +146,33 @@ export class SurfRuntime implements SurfService {
       return { status: 'error', error: safe };
     } finally { if (entered) this.active--; }
   }
+  /** 缓存键：种类 + 决定结果的入参。配置一变就整表清掉，所以键里不用带来源链以外的设置。 */
+  private cacheKey(kind: string, parts: unknown[]): string {
+    return kind + '\u0000' + JSON.stringify(parts);
+  }
+  private cacheGet<T>(key: string): { data: T; agoMs: number } | undefined {
+    const hit = this.cache.get(key);
+    if (!hit) return undefined;
+    if (hit.expires <= this.now()) { this.cache.delete(key); return undefined; }
+    return { data: JSON.parse(JSON.stringify(hit.value)) as T, agoMs: Math.max(0, this.now() - hit.at) };
+  }
+  /** 只缓存成功且非空的结果：失败和零条都让下一次重新去问。 */
+  private cachePut(key: string, value: unknown) {
+    const ttl = this.config.cacheSeconds;
+    if (!ttl || ttl <= 0) return;
+    while (this.cache.size >= 64) {
+      const oldest = this.cache.keys().next();
+      if (oldest.done) break;
+      this.cache.delete(oldest.value);
+    }
+    const now = this.now();
+    this.cache.set(key, { expires: now + ttl * 1000, at: now, value: JSON.parse(JSON.stringify(value)) });
+  }
   private prune() {
     for (const [ref, page] of this.pages) if (page.expires <= this.now()) this.pages.delete(ref);
     for (const [key, offer] of this.offers) if (offer.expires <= this.now() || offer.binding.signal.aborted) this.offers.delete(key);
     for (const [key, offer] of this.collectionOffers) if (offer.expires <= this.now() || offer.binding.signal.aborted) this.collectionOffers.delete(key);
+    for (const [key, hit] of this.cache) if (hit.expires <= this.now()) this.cache.delete(key);
   }
   private async releaseOffer(binding: OptionalService<VisionService>, sessionId: string, mediaRef: string) {
     if (binding.signal.aborted) return;
@@ -233,6 +258,9 @@ export class SurfRuntime implements SurfService {
       if (!Number.isInteger(limit) || limit < 1 || limit > 10) throw new SurfError('invalid_input');
       const providers = this.config.searchProviders;
       const vertical = verticalOf(input);
+      const cacheKey = this.cacheKey('search', [input.query.trim(), limit, providers, vertical]);
+      const cached = this.cacheGet<SearchData>(cacheKey);
+      if (cached) return { ...cached.data, cached: true, cachedAgoMs: cached.agoMs };
       const notes: string[] = [];
       const wantsVertical = vertical.tag !== undefined || vertical.zone !== undefined || vertical.language !== undefined;
       if (wantsVertical) {
@@ -262,8 +290,10 @@ export class SurfRuntime implements SurfService {
             fallback.push({ provider, elapsedMs: Math.round(performance.now() - started), code: 'search_empty', reason: '来源返回零条结果。' });
             continue;
           }
-          return { provider, results, untrusted: true, elapsedMs: Math.round(performance.now() - started),
+          const found: SearchData = { provider, results, untrusted: true, elapsedMs: Math.round(performance.now() - started),
             ...(fallback.length ? { fallback } : {}), ...(notes.length ? { notes } : {}) };
+          this.cachePut(cacheKey, found);
+          return found;
         } catch (error) {
           if (signal.aborted) throw new SurfError('cancelled');
           const failure = safeError(remaining < 1 || performance.now() - started >= remaining ||
@@ -297,6 +327,9 @@ export class SurfRuntime implements SurfService {
             new Set(list).size !== list.length) throw new SurfError('invalid_input');
         sources = [...list];
       }
+      const scholarKey = this.cacheKey('scholar', [query, limit, sources, yearMin ?? null]);
+      const scholarHit = this.cacheGet<ScholarData>(scholarKey);
+      if (scholarHit) return { ...scholarHit.data, cached: true, cachedAgoMs: scholarHit.agoMs };
       const deadline = performance.now() + this.config.timeoutMs;
       const fallback: SearchFailure[] = [];
       let lastCode: ReturnType<typeof safeError>['code'] = 'search_exhausted';
@@ -330,8 +363,10 @@ export class SurfRuntime implements SurfService {
             continue;
           }
           if (kept.length < items.length) notes.push('按 yearMin 过滤掉 ' + (items.length - kept.length) + ' 条早于 ' + yearMin + ' 年的记录。');
-          return { source, items: kept, untrusted: true as const, elapsedMs: Math.round(performance.now() - started),
+          const found: ScholarData = { source, items: kept, untrusted: true as const, elapsedMs: Math.round(performance.now() - started),
             ...(fallback.length ? { fallback } : {}), ...(notes.length ? { notes } : {}) };
+          this.cachePut(scholarKey, found);
+          return found;
         } catch (error) {
           if (signal.aborted) throw new SurfError('cancelled');
           const failure = safeError(remaining < 1 || performance.now() - started >= remaining ||
@@ -362,6 +397,9 @@ export class SurfRuntime implements SurfService {
             new Set(list).size !== list.length) throw new SurfError('invalid_input');
         sources = [...list];
       }
+      const factKey = this.cacheKey('facts', [query, limit, sources, lang]);
+      const factHit = this.cacheGet<FactData>(factKey);
+      if (factHit) return { ...factHit.data, cached: true, cachedAgoMs: factHit.agoMs };
       const deadline = performance.now() + this.config.timeoutMs;
       const fallback: FactFailure[] = [];
       let lastCode: ReturnType<typeof safeError>['code'] = 'search_exhausted';
@@ -392,8 +430,10 @@ export class SurfRuntime implements SurfService {
               reason: '来源返回零条结果。' });
             continue;
           }
-          return { source, items, untrusted: true as const, elapsedMs: Math.round(performance.now() - started),
+          const found: FactData = { source, items, untrusted: true as const, elapsedMs: Math.round(performance.now() - started),
             ...(fallback.length ? { fallback } : {}) };
+          this.cachePut(factKey, found);
+          return found;
         } catch (error) {
           if (signal.aborted) throw new SurfError('cancelled');
           const failure = safeError(error);
