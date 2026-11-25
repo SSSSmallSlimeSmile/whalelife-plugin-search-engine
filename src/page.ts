@@ -86,15 +86,15 @@ export const settingsPage = `<!doctype html>
 .src-card[draggable="true"]::before{content:"\u2261";position:absolute;left:8px;top:8px;font-size:12px;line-height:1;color:#9aa0b0}
 .src-card.drag{opacity:.45}
 .src-card.over{border-color:#7c5cff;background:rgba(124,92,255,.10)}
-.src-card.on{border-color:#7c5cff;background:rgba(124,92,255,.07);box-shadow:0 0 0 1px rgba(124,92,255,.45),0 3px 14px rgba(124,92,255,.22),0 0 22px rgba(124,92,255,.18)}
-.src-card.on:hover{border-color:#6d4aff;box-shadow:0 0 0 1px rgba(124,92,255,.6),0 4px 18px rgba(124,92,255,.3),0 0 28px rgba(124,92,255,.26)}
+.src-card.on{border-color:#7c5cff;background:rgba(124,92,255,.07)}
+.src-card.on:hover{border-color:#6d4aff}
 .src-grid.drag-on .src-card.on{border-color:rgba(124,92,255,.35)}
 .src-card.on::after{content:"✓";background:#7c5cff;border-color:#7c5cff;color:#fff}
 .src-card.on em{color:#15803d}
 .preset b{font-size:13px}
 .preset span{font-size:12px;color:#797e8c;line-height:1.45}
 .preset em{font-size:11px;color:#6d4aff;font-style:normal}
-.preset.on{cursor:default;border-color:rgba(124,92,255,.45);background:rgba(124,92,255,.06);box-shadow:0 0 0 1px rgba(124,92,255,.4),0 3px 14px rgba(124,92,255,.2),0 0 22px rgba(124,92,255,.16)}
+.preset.on{cursor:default;border-color:rgba(124,92,255,.45);background:rgba(124,92,255,.06)}
 .preset.on em{color:#15803d}
 .preset.blocked{opacity:.55;cursor:not-allowed}
 .preset.blocked em{color:#b45309}
