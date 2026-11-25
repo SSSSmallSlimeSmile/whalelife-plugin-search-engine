@@ -102,7 +102,6 @@ export async function applyWithDependencies(ctx: Context, dependencies: Dependen
       stopScholar(); stopScholar = undefined;
     }
   };
-  syncScholar();
   ctx.effect(() => () => { if (stopScholar) stopScholar(); stopScholar = undefined; });
   // 事实查询同样默认不注册：勾了设置才出现 search_facts。
   let stopFacts: (() => void) | undefined;
@@ -125,7 +124,22 @@ export async function applyWithDependencies(ctx: Context, dependencies: Dependen
       stopFacts(); stopFacts = undefined;
     }
   };
-  syncFacts();
+  function syncSearchTools() {
+    const errors = [];
+    for (const [tool, want, sync] of [
+      ['search_scholar', config.scholarEnabled, syncScholar],
+      ['search_facts', config.factsEnabled, syncFacts],
+    ] as const) {
+      try { sync(); }
+      catch {
+        const action = want ? 'register' : 'unregister';
+        const message = (want ? '注册' : '注销') + ' ' + tool + ' 失败，宿主工具接口返回错误。';
+        errors.push({ tool, action, message });
+      }
+    }
+    return errors;
+  }
+  let registrationErrors = syncSearchTools();
   ctx.effect(() => () => { if (stopFacts) stopFacts(); stopFacts = undefined; });
 
   if (transient && typeof ctx.tools.registerMultimodal === 'function' && typeof ctx.optional === 'function') {
@@ -156,7 +170,7 @@ export async function applyWithDependencies(ctx: Context, dependencies: Dependen
 
   let revisionToken = randomUUID();
   const revision = () => revisionToken;
-  const state = () => ({ config: publicConfig(config), revision: revision(), status: runtime.status(), pendingReload });
+  const state = () => ({ config: publicConfig(config), revision: revision(), status: runtime.status(), pendingReload, registrationErrors });
   const wrap = (handler: PluginHandler): PluginHandler => async (req, res, context) => {
     res.setHeader('Cache-Control', 'no-store');
     try { await handler(req, res, context); }
@@ -184,7 +198,7 @@ export async function applyWithDependencies(ctx: Context, dependencies: Dependen
       if (body.revision !== revision()) throw new SurfError('config_conflict');
       const next = updateConfig(body.config, config);
       await ctx.config.save('config.json', next); config = next; revisionToken = randomUUID(); pendingReload = true;
-      runtime.setConfig(next); syncScholar(); syncFacts();
+      runtime.setConfig(next); configValid = true; registrationErrors = syncSearchTools();
     });
     saving = change.catch(() => {}); await change;
     res.setHeader('Content-Type', 'application/json; charset=utf-8'); res.end(JSON.stringify({ ok: true, ...state() }));

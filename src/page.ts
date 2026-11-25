@@ -86,15 +86,15 @@ export const settingsPage = `<!doctype html>
 .src-card[draggable="true"]::before{content:"\u2261";position:absolute;left:8px;top:8px;font-size:12px;line-height:1;color:#9aa0b0}
 .src-card.drag{opacity:.45}
 .src-card.over{border-color:#7c5cff;background:rgba(124,92,255,.10)}
-.src-card.on{border-color:#7c5cff;background:rgba(124,92,255,.07);box-shadow:0 0 0 1px rgba(124,92,255,.55),0 2px 10px rgba(124,92,255,.26),0 0 18px rgba(124,92,255,.20)}
-.src-card.on:hover{box-shadow:0 0 0 1px rgba(124,92,255,.7),0 3px 14px rgba(124,92,255,.34),0 0 24px rgba(124,92,255,.28)}
-.src-grid.drag-on .src-card.on{box-shadow:0 0 0 1px rgba(124,92,255,.35),0 0 10px rgba(124,92,255,.12)}
+.src-card.on{border-color:#7c5cff;background:rgba(124,92,255,.07);box-shadow:0 0 0 1px rgba(124,92,255,.45),0 3px 14px rgba(124,92,255,.22),0 0 22px rgba(124,92,255,.18)}
+.src-card.on:hover{border-color:#6d4aff;box-shadow:0 0 0 1px rgba(124,92,255,.6),0 4px 18px rgba(124,92,255,.3),0 0 28px rgba(124,92,255,.26)}
+.src-grid.drag-on .src-card.on{border-color:rgba(124,92,255,.35)}
 .src-card.on::after{content:"✓";background:#7c5cff;border-color:#7c5cff;color:#fff}
 .src-card.on em{color:#15803d}
 .preset b{font-size:13px}
 .preset span{font-size:12px;color:#797e8c;line-height:1.45}
 .preset em{font-size:11px;color:#6d4aff;font-style:normal}
-.preset.on{cursor:default;border-color:rgba(124,92,255,.45);background:rgba(124,92,255,.06);box-shadow:0 0 0 1px rgba(124,92,255,.18),0 2px 10px rgba(124,92,255,.12),0 0 14px rgba(124,92,255,.09)}
+.preset.on{cursor:default;border-color:rgba(124,92,255,.45);background:rgba(124,92,255,.06);box-shadow:0 0 0 1px rgba(124,92,255,.4),0 3px 14px rgba(124,92,255,.2),0 0 22px rgba(124,92,255,.16)}
 .preset.on em{color:#15803d}
 .preset.blocked{opacity:.55;cursor:not-allowed}
 .preset.blocked em{color:#b45309}
@@ -304,6 +304,14 @@ function hasKeyFor(name) {
   if (name === "tavily") return hasTavilyKey;
   if (name === "exa") return hasExaKey;
   return true;
+}
+function restoreSourceOrder(selector, sources) {
+  const boxes = new Map([...document.querySelectorAll(selector)].map(box => [box.value, box]));
+  for (const [name, box] of boxes) box.checked = sources.includes(name);
+  for (const name of sources) {
+    const card = boxes.get(name)?.closest(".src-card");
+    if (card) card.parentElement.append(card);
+  }
 }
 function syncSrcCards() {
   for (const grid of document.querySelectorAll(".src-grid")) {
@@ -789,10 +797,10 @@ function show(data) {
   byId("proxyState").textContent = c.hasProxy ? "已有代理，地址和凭据不回传页面。" : "当前直连。";
   byId("scholarEnabled").checked = Boolean(c.scholarEnabled);
   byId("scholarMailto").value = c.scholarMailto || "";
-  for (const box of document.querySelectorAll(".scholar-src")) box.checked = (c.scholarSources || []).includes(box.value);
+  restoreSourceOrder(".scholar-src", c.scholarSources || []);
   byId("factsEnabled").checked = Boolean(c.factsEnabled);
   byId("factsLang").value = c.factsLang || "zh";
-  for (const box of document.querySelectorAll(".fact-src")) box.checked = (c.factsSources || []).includes(box.value);
+  restoreSourceOrder(".fact-src", c.factsSources || []);
   syncSrcCards();
   byId("save").disabled = false;
 }
@@ -804,8 +812,10 @@ async function load() {
   try {
     const res = await fetch("/plugins/search-engine/config", { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
-    show(await res.json());
-    byId("msg").textContent = "";
+    const body = await res.json();
+    show(body);
+    byId("msg").className = body.registrationErrors?.length ? "err" : "";
+    byId("msg").textContent = (body.registrationErrors || []).map(item => item.message).join(" ");
   } catch (error) {
     byId("msg").className = "err";
     byId("msg").textContent = "读取设置失败：" + (error && error.message ? error.message : error);
@@ -957,7 +967,10 @@ byId("f").onsubmit = async (event) => {
     const body = await res.json().catch(() => ({}));
     if (!res.ok || !body.ok) throw new Error((body.error && body.error.message) || ("HTTP " + res.status));
     show(body);
-    byId("msg").textContent = "已保存，设置即时生效";
+    byId("msg").className = body.registrationErrors?.length ? "err" : "";
+    byId("msg").textContent = body.registrationErrors?.length
+      ? "已保存配置。 " + body.registrationErrors.map(item => item.message).join(" ")
+      : "已保存，设置即时生效";
   } catch (error) {
     byId("msg").className = "err";
     byId("msg").textContent = "没存上：" + (error && error.message ? error.message : error);

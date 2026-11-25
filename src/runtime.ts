@@ -28,27 +28,29 @@ const PAGE_CHUNK = 6000;
  */
 function trimResults(results: SearchItem[], maxChars: number): { results: SearchItem[]; truncated: number } {
   if (maxChars <= 0 || results.length === 0) return { results, truncated: 0 };
-  const cost = (item: SearchItem) => JSON.stringify(item).length;
   const kept: SearchItem[] = [];
-  let used = 0;
+  let used = 2; // JSON array brackets
   for (const item of results) {
-    const size = cost(item);
-    if (used + size <= maxChars) { kept.push(item); used += size; continue; }
-    const room = maxChars - used;
-    // snippet 为空时序列化只剩前后两个引号，减掉它们才是骨架的真实长度。
-    const skeleton = cost({ ...item, snippet: '' }) - 2;
-    if (kept.length > 0 && room > skeleton + 40) {
-      let snippet = item.snippet.slice(0, room - skeleton - 20);
-      if (/[\uD800-\uDBFF]$/.test(snippet)) snippet = snippet.slice(0, -1);
-      kept.push({ ...item, snippet: snippet.trimEnd() + '…' });
+    const separator = kept.length ? 1 : 0;
+    const room = maxChars - used - separator;
+    const size = JSON.stringify(item).length;
+    if (size <= room) {
+      used += separator + size;
+      kept.push(item);
+      continue;
+    }
+    const skeleton = { ...item, snippet: '' };
+    let space = room - JSON.stringify(skeleton).length;
+    if (space >= 0 || kept.length === 0) {
+      let snippet = '';
+      for (const char of item.snippet) {
+        space -= JSON.stringify(char).length - 2;
+        if (space < 0) break;
+        snippet += char;
+      }
+      kept.push({ ...skeleton, snippet });
     }
     break;
-  }
-  if (kept.length === 0) {
-    // 预算小到连一条都装不下：留第一条的骨架，摘要截到剩下多少算多少。
-    let snippet = results[0].snippet.slice(0, Math.max(0, maxChars - 60));
-    if (/[\uD800-\uDBFF]$/.test(snippet)) snippet = snippet.slice(0, -1);
-    kept.push({ ...results[0], snippet });
   }
   return { results: kept, truncated: results.length - kept.length };
 }
@@ -131,13 +133,13 @@ export class SurfRuntime implements SurfService {
   private collectionOffers = new Map<string, StoredCollectionOffer>();
   private collectionRequests = new Set<string>();
   constructor(config: SurfConfig, fetcher: PublicFetcher, options: { signal: AbortSignal; transient: boolean; configValid: boolean; now?: () => number }) {
-    this.config = { ...config, searchProviders: [...config.searchProviders] }; this.fetcher = fetcher; this.now = options.now ?? Date.now;
+    this.config = structuredClone(config); this.fetcher = fetcher; this.now = options.now ?? Date.now;
     this.signal = AbortSignal.any([options.signal, this.aborter.signal]);
     this.transient = options.transient; this.configValid = options.configValid;
   }
   /** 保存设置后立刻把新配置交给运行时，不用重载插件。 */
   setConfig(next: SurfConfig) {
-    this.config = { ...next, searchProviders: [...next.searchProviders], scholarSources: [...next.scholarSources] };
+    this.config = structuredClone(next);
     this.configValid = true;
     this.cache.clear();
   }
@@ -188,8 +190,9 @@ export class SurfRuntime implements SurfService {
     return { data: JSON.parse(JSON.stringify(hit.value)) as T, agoMs: Math.max(0, this.now() - hit.at) };
   }
   /** 只缓存成功且非空的结果：失败和零条都让下一次重新去问。 */
-  private cachePut(key: string, value: unknown) {
-    const ttl = this.config.cacheSeconds;
+  private cachePut(config: SurfConfig, signal: AbortSignal, key: string, value: unknown) {
+    if (config !== this.config || signal.aborted) return;
+    const ttl = config.cacheSeconds;
     if (!ttl || ttl <= 0) return;
     while (this.cache.size >= 64) {
       const oldest = this.cache.keys().next();
@@ -251,11 +254,11 @@ export class SurfRuntime implements SurfService {
     }
   }
   /** 每个来源最多等多久：用户给了就按它，但不超过这次剩下的预算。 */
-  private sourceBudget(name: string, index: number, count: number, remaining: number): number {
-    const fixed = this.config.sourceTimeouts?.[name];
+  private sourceBudget(config: SurfConfig, name: string, index: number, count: number, remaining: number): number {
+    const fixed = config.sourceTimeouts?.[name];
     if (typeof fixed === 'number' && fixed > 0) return Math.max(1, Math.min(fixed, Math.floor(remaining)));
     // 没有单独设过：首个来源最可能成，给剩余预算的 70%；其后的按剩余来源数均分。
-    return count === 1 ? this.config.timeoutMs
+    return count === 1 ? Math.floor(remaining)
       : Math.max(1, Math.floor(index === 0 ? remaining * 0.7 : remaining / (count - index)));
   }
   private page(session: string, ref: unknown): StoredPage {
@@ -283,11 +286,12 @@ export class SurfRuntime implements SurfService {
   }
   search(input: SearchInput & { sessionId: string }, options?: CallOptions): Promise<OperationResult<SearchData>> {
     return this.execute(input?.sessionId, options, async (_session, signal) => {
+      const config = this.config;
       object(input);
       if (typeof input.query !== 'string' || !input.query.trim() || input.query.length > 600 || /[\x00-\x1f\x7f]/.test(input.query)) throw new SurfError('invalid_input');
-      const limit = input.limit ?? this.config.resultsLimit;
+      const limit = input.limit ?? config.resultsLimit;
       if (!Number.isInteger(limit) || limit < 1 || limit > 10) throw new SurfError('invalid_input');
-      const providers = this.config.searchProviders;
+      const providers = config.searchProviders;
       const vertical = verticalOf(input);
       const cacheKey = this.cacheKey('search', [input.query.trim(), limit, providers, vertical]);
       const cached = this.cacheGet<SearchData>(cacheKey);
@@ -298,7 +302,7 @@ export class SurfRuntime implements SurfService {
         if (!providers.includes('anysearch')) notes.push('这次带了 tag/zone/language，但搜索来源里没有 anysearch，这几个参数没有生效。');
         else for (const provider of providers) if (provider !== 'anysearch') notes.push(provider + ' 不支持垂直搜索，tag/zone/language 只交给 anysearch。');
       }
-      const deadline = performance.now() + this.config.timeoutMs;
+      const deadline = performance.now() + config.timeoutMs;
       const fallback: SearchFailure[] = [];
       let lastCode: ReturnType<typeof safeError>['code'] = 'search_exhausted';
       let answered = false;
@@ -307,13 +311,14 @@ export class SurfRuntime implements SurfService {
         if (signal.aborted) throw new SurfError('cancelled');
         const started = performance.now();
         const remaining = deadline - started;
+        let limitSignal: AbortSignal | undefined;
         try {
           if (remaining < 1) throw new SurfError('timeout');
-          const timeoutMs = this.sourceBudget(provider, index, providers.length, remaining);
-          const limitSignal = AbortSignal.timeout(timeoutMs);
+          const timeoutMs = this.sourceBudget(config, provider, index, providers.length, remaining);
+          limitSignal = AbortSignal.timeout(timeoutMs);
           const attemptSignal = AbortSignal.any([signal, limitSignal]);
-          const results = await untilCancelled(attemptSignal, () => this.searchSource(provider, input.query.trim(), limit, attemptSignal, timeoutMs, vertical));
-          if (limitSignal.aborted || (providers.length > 1 && performance.now() > deadline)) throw new SurfError('timeout');
+          const results = await untilCancelled(attemptSignal, () => this.searchSource(provider, input.query.trim(), limit, attemptSignal, timeoutMs, vertical, config));
+          if (limitSignal.aborted || performance.now() - started >= timeoutMs) throw new SurfError('timeout');
           answered = true;
           if (results.length === 0) {
             // 连上了、返回零条：这是答案不是故障。记下原因，继续试下一个来源。
@@ -321,16 +326,16 @@ export class SurfRuntime implements SurfService {
             fallback.push({ provider, elapsedMs: Math.round(performance.now() - started), code: 'search_empty', reason: '来源返回零条结果。' });
             continue;
           }
-          const trimmed = trimResults(results, this.config.resultsMaxChars);
+          const trimmed = trimResults(results, config.resultsMaxChars);
           const found: SearchData = { provider, results: trimmed.results, untrusted: true, elapsedMs: Math.round(performance.now() - started),
             ...(trimmed.truncated ? { truncated: trimmed.truncated } : {}),
             ...(fallback.length ? { fallback } : {}), ...(notes.length ? { notes } : {}) };
-          this.cachePut(cacheKey, found);
+          this.cachePut(config, signal, cacheKey, found);
           return found;
         } catch (error) {
           if (signal.aborted) throw new SurfError('cancelled');
-          const failure = safeError(remaining < 1 || performance.now() - started >= remaining ||
-            (error instanceof SurfError && error.code === 'cancelled') ? new SurfError('timeout') : error);
+          const failure = safeError(limitSignal?.aborted || performance.now() >= deadline || remaining < 1
+            ? new SurfError('timeout') : error);
           lastCode = failure.code;
           fallback.push({ provider, elapsedMs: Math.round(performance.now() - started), code: failure.code, reason: failure.message });
         }
@@ -342,18 +347,19 @@ export class SurfRuntime implements SurfService {
   /** 学术搜索：四个公开来源顺序回退；连上但零条算应答，不一路试到“全挂”。 */
   scholar(input: ScholarInput & { sessionId: string }, options?: CallOptions): Promise<OperationResult<ScholarData>> {
     return this.execute(input?.sessionId, options, async (_session, signal) => {
+      const config = this.config;
       object(input);
-      if (!this.config.scholarEnabled) throw new SurfError('search_unconfigured');
+      if (!config.scholarEnabled) throw new SurfError('search_unconfigured');
       const query = typeof input.query === 'string' ? input.query.trim() : '';
       if (!query || query.length > 300 || /[\x00-\x1f\x7f]/.test(query)) throw new SurfError('invalid_input');
-      const limit = input.limit ?? this.config.resultsLimit;
+      const limit = input.limit ?? config.resultsLimit;
       if (!Number.isInteger(limit) || limit < 1 || limit > 10) throw new SurfError('invalid_input');
       let yearMin: number | undefined;
       if (input.yearMin !== undefined) {
         if (!Number.isInteger(input.yearMin) || input.yearMin < 1900 || input.yearMin > 2100) throw new SurfError('invalid_input');
         yearMin = input.yearMin;
       }
-      let sources = this.config.scholarSources;
+      let sources = config.scholarSources;
       if (input.sources !== undefined) {
         const list = input.sources;
         if (!Array.isArray(list) || list.length === 0 || list.length > 4 || !list.every(isScholarSource) ||
@@ -363,7 +369,7 @@ export class SurfRuntime implements SurfService {
       const scholarKey = this.cacheKey('scholar', [query, limit, sources, yearMin ?? null]);
       const scholarHit = this.cacheGet<ScholarData>(scholarKey);
       if (scholarHit) return { ...scholarHit.data, cached: true, cachedAgoMs: scholarHit.agoMs };
-      const deadline = performance.now() + this.config.timeoutMs;
+      const deadline = performance.now() + config.timeoutMs;
       const fallback: SearchFailure[] = [];
       let lastCode: ReturnType<typeof safeError>['code'] = 'search_exhausted';
       let answeredCode: 'search_empty' | undefined;
@@ -372,20 +378,21 @@ export class SurfRuntime implements SurfService {
         if (signal.aborted) throw new SurfError('cancelled');
         const started = performance.now();
         const remaining = deadline - started;
+        let limitSignal: AbortSignal | undefined;
         try {
           if (remaining < 1) throw new SurfError('timeout');
-          const timeoutMs = this.sourceBudget(source, index, sources.length, remaining);
-          const limitSignal = AbortSignal.timeout(timeoutMs);
+          const timeoutMs = this.sourceBudget(config, source, index, sources.length, remaining);
+          limitSignal = AbortSignal.timeout(timeoutMs);
           const attemptSignal = AbortSignal.any([signal, limitSignal]);
-          const request = buildRequest(source, query, limit, this.config.scholarMailto);
+          const request = buildRequest(source, query, limit, config.scholarMailto);
           const items: ScholarItem[] = await untilCancelled(attemptSignal, async () => {
             const response = await this.fetcher.get(request.url, { signal: attemptSignal, timeoutMs,
-              maxBytes: this.config.maxPageBytes, proxyUrl: this.config.proxyUrl, allowRedirects: true,
+              maxBytes: config.maxPageBytes, proxyUrl: config.proxyUrl, allowRedirects: true,
               headers: request.headers });
             checkResponse(response.status);
             return parseScholar(source, response.body, limit);
           });
-          if (limitSignal.aborted || (sources.length > 1 && performance.now() > deadline)) throw new SurfError('timeout');
+          if (limitSignal.aborted || performance.now() - started >= timeoutMs) throw new SurfError('timeout');
           answered = true;
           const kept = yearMin === undefined ? items : items.filter(item => item.year === undefined || item.year >= yearMin);
           const notes: string[] = [];
@@ -398,12 +405,12 @@ export class SurfRuntime implements SurfService {
           if (kept.length < items.length) notes.push('按 yearMin 过滤掉 ' + (items.length - kept.length) + ' 条早于 ' + yearMin + ' 年的记录。');
           const found: ScholarData = { source, items: kept, untrusted: true as const, elapsedMs: Math.round(performance.now() - started),
             ...(fallback.length ? { fallback } : {}), ...(notes.length ? { notes } : {}) };
-          this.cachePut(scholarKey, found);
+          this.cachePut(config, signal, scholarKey, found);
           return found;
         } catch (error) {
           if (signal.aborted) throw new SurfError('cancelled');
-          const failure = safeError(remaining < 1 || performance.now() - started >= remaining ||
-            (error instanceof SurfError && error.code === 'cancelled') ? new SurfError('timeout') : error);
+          const failure = safeError(limitSignal?.aborted || performance.now() >= deadline || remaining < 1
+            ? new SurfError('timeout') : error);
           lastCode = failure.code;
           fallback.push({ provider: source as unknown as SearchProvider, elapsedMs: Math.round(performance.now() - started),
             code: failure.code, reason: failure.message });
@@ -416,14 +423,15 @@ export class SurfRuntime implements SurfService {
   /** 事实查询：维基/维基数据/OpenLibrary/OEIS，顺序回退，零条算应答。 */
   facts(input: FactInput & { sessionId: string }, options?: CallOptions): Promise<OperationResult<FactData>> {
     return this.execute(input?.sessionId, options, async (_session, signal) => {
+      const config = this.config;
       object(input);
-      if (!this.config.factsEnabled) throw new SurfError('search_unconfigured');
+      if (!config.factsEnabled) throw new SurfError('search_unconfigured');
       const query = typeof input.query === 'string' ? input.query.trim() : '';
       if (!query || query.length > 300 || /[\x00-\x1f\x7f]/.test(query)) throw new SurfError('invalid_input');
-      const limit = input.limit ?? this.config.resultsLimit;
+      const limit = input.limit ?? config.resultsLimit;
       if (!Number.isInteger(limit) || limit < 1 || limit > 10) throw new SurfError('invalid_input');
-      const lang = input.lang === 'zh' || input.lang === 'en' ? input.lang : this.config.factsLang;
-      let sources = this.config.factsSources;
+      const lang = input.lang === 'zh' || input.lang === 'en' ? input.lang : config.factsLang;
+      let sources = config.factsSources;
       if (input.sources !== undefined) {
         const list = input.sources;
         if (!Array.isArray(list) || list.length === 0 || list.length > 4 || !list.every(isFactSource) ||
@@ -433,7 +441,7 @@ export class SurfRuntime implements SurfService {
       const factKey = this.cacheKey('facts', [query, limit, sources, lang]);
       const factHit = this.cacheGet<FactData>(factKey);
       if (factHit) return { ...factHit.data, cached: true, cachedAgoMs: factHit.agoMs };
-      const deadline = performance.now() + this.config.timeoutMs;
+      const deadline = performance.now() + config.timeoutMs;
       const fallback: FactFailure[] = [];
       let lastCode: ReturnType<typeof safeError>['code'] = 'search_exhausted';
       let answered = false;
@@ -442,20 +450,21 @@ export class SurfRuntime implements SurfService {
         if (signal.aborted) throw new SurfError('cancelled');
         const started = performance.now();
         const remaining = deadline - started;
+        let limitSignal: AbortSignal | undefined;
         try {
           if (remaining < 1) throw new SurfError('timeout');
-          const timeoutMs = this.sourceBudget(source, index, sources.length, remaining);
-          const limitSignal = AbortSignal.timeout(timeoutMs);
+          const timeoutMs = this.sourceBudget(config, source, index, sources.length, remaining);
+          limitSignal = AbortSignal.timeout(timeoutMs);
           const attemptSignal = AbortSignal.any([signal, limitSignal]);
           const request = buildFactRequest(source, query, limit, lang);
           const items: FactItem[] = await untilCancelled(attemptSignal, async () => {
             const response = await this.fetcher.get(request.url, { signal: attemptSignal, timeoutMs,
-              maxBytes: this.config.maxPageBytes, proxyUrl: this.config.proxyUrl, allowRedirects: true,
+              maxBytes: config.maxPageBytes, proxyUrl: config.proxyUrl, allowRedirects: true,
               headers: request.headers });
             checkResponse(response.status);
             return parseFact(source, response.body, limit, lang);
           });
-          if (limitSignal.aborted || (sources.length > 1 && performance.now() > deadline)) throw new SurfError('timeout');
+          if (limitSignal.aborted || performance.now() - started >= timeoutMs) throw new SurfError('timeout');
           answered = true;
           if (items.length === 0) {
             answeredCode = 'search_empty';
@@ -465,11 +474,12 @@ export class SurfRuntime implements SurfService {
           }
           const found: FactData = { source, items, untrusted: true as const, elapsedMs: Math.round(performance.now() - started),
             ...(fallback.length ? { fallback } : {}) };
-          this.cachePut(factKey, found);
+          this.cachePut(config, signal, factKey, found);
           return found;
         } catch (error) {
           if (signal.aborted) throw new SurfError('cancelled');
-          const failure = safeError(error);
+          const failure = safeError(limitSignal?.aborted || performance.now() >= deadline || remaining < 1
+            ? new SurfError('timeout') : error);
           lastCode = failure.code;
           fallback.push({ source, elapsedMs: Math.round(performance.now() - started), code: failure.code, reason: failure.message });
         }
@@ -527,16 +537,16 @@ export class SurfRuntime implements SurfService {
     }
   }
   private async searchSource(provider: SearchProvider, query: string, limit: number, signal: AbortSignal, timeoutMs: number,
-    vertical: Vertical) {
-    if (provider === 'brave' && !this.config.braveApiKey) throw new SurfError('search_unconfigured');
-    if (provider === 'anysearch') return this.searchAnySearch(query, limit, signal, timeoutMs, vertical);
+    vertical: Vertical, config = this.config) {
+    if (provider === 'brave' && !config.braveApiKey) throw new SurfError('search_unconfigured');
+    if (provider === 'anysearch') return this.searchAnySearch(query, limit, signal, timeoutMs, vertical, config);
     // 自定义来源：名字对不上配置就当场拒，不静默跳过（跳过等于链上少一环还看不出来）。
     if (provider.startsWith('custom:')) {
-      const source = this.config.customSources.find(item => 'custom:' + item.name === provider);
+      const source = config.customSources.find(item => 'custom:' + item.name === provider);
       if (!source) throw new SurfError('search_unconfigured');
       const request = buildCustomRequest(source, query, limit);
       const response = await this.fetcher.get(request.url, { method: request.method, body: request.body,
-        signal, timeoutMs, maxBytes: this.config.maxPageBytes, proxyUrl: this.config.proxyUrl,
+        signal, timeoutMs, maxBytes: config.maxPageBytes, proxyUrl: config.proxyUrl,
         allowRedirects: request.allowRedirects, headers: request.headers });
       if (response.status < 200 || response.status > 299) {
         const code = [401, 403, 429].includes(response.status) ? 'access_blocked'
@@ -548,9 +558,9 @@ export class SurfRuntime implements SurfService {
     }
     // 只吃公开 JSON 接口的四个来源：请求和解析都在 jsonsources 里，这里只管发和分级报错。
     if (isJsonSource(provider)) {
-      const request = buildJsonRequest(provider, query, limit, this.config);
+      const request = buildJsonRequest(provider, query, limit, config);
       const response = await this.fetcher.get(request.url, { method: request.method, body: request.body,
-        signal, timeoutMs, maxBytes: this.config.maxPageBytes, proxyUrl: this.config.proxyUrl,
+        signal, timeoutMs, maxBytes: config.maxPageBytes, proxyUrl: config.proxyUrl,
         allowRedirects: request.allowRedirects, headers: request.headers });
       if (response.status < 200 || response.status > 299) {
         const code = [401, 403, 429].includes(response.status) ? 'access_blocked'
@@ -565,25 +575,25 @@ export class SurfRuntime implements SurfService {
     url.searchParams.set('q', query);
     if (provider === 'brave') url.searchParams.set('count', String(limit));
     const response = await this.fetcher.get(url.href, { signal, timeoutMs,
-      maxBytes: this.config.maxPageBytes, proxyUrl: this.config.proxyUrl, allowRedirects: provider !== 'brave',
-      headers: provider === 'brave' ? { 'X-Subscription-Token': this.config.braveApiKey, Accept: 'application/json' } : { Accept: 'text/html' } });
+      maxBytes: config.maxPageBytes, proxyUrl: config.proxyUrl, allowRedirects: provider !== 'brave',
+      headers: provider === 'brave' ? { 'X-Subscription-Token': config.braveApiKey, Accept: 'application/json' } : { Accept: 'text/html' } });
     checkResponse(response.status);
     return provider === 'brave' ? parseBrave(response.body, limit)
       : provider === 'bing' ? parseBing(response.body, response.url, limit) : parseDuckDuckGo(response.body, response.url, limit);
   }
   /** AnySearch 走 POST JSON；没配 Key 时用它的匿名额度。跳转一律不跟，正文不外发。 */
-  private async searchAnySearch(query: string, limit: number, signal: AbortSignal, timeoutMs: number, vertical: Vertical) {
+  private async searchAnySearch(query: string, limit: number, signal: AbortSignal, timeoutMs: number, vertical: Vertical, config: SurfConfig) {
     const payload: Record<string, unknown> = { query, max_results: limit, format: 'json',
-      zone: vertical.zone ?? this.config.anysearchZone };
+      zone: vertical.zone ?? config.anysearchZone };
     if (vertical.tag) payload.tag = vertical.tag;
     if (vertical.language) payload.language = vertical.language;
     // 垂直搜索的必填项由来源自己校验（如 finance.quote 要 type、security.vuln 要 type+value）。
     if (vertical.params) payload.params = vertical.params;
     const response = await this.fetcher.get('https://api.anysearch.com/v1/search', {
       method: 'POST', body: JSON.stringify(payload), signal, timeoutMs,
-      maxBytes: this.config.maxPageBytes, proxyUrl: this.config.proxyUrl, allowRedirects: false,
+      maxBytes: config.maxPageBytes, proxyUrl: config.proxyUrl, allowRedirects: false,
       headers: { Accept: 'application/json', 'Content-Type': 'application/json',
-        ...(this.config.anysearchApiKey ? { Authorization: 'Bearer ' + this.config.anysearchApiKey } : {}) },
+        ...(config.anysearchApiKey ? { Authorization: 'Bearer ' + config.anysearchApiKey } : {}) },
     });
     // 4xx 时来源通常会说清缺什么（缺哪个参数、tag 是否有效），这比笼统的 http_error 有用。
     if (response.status < 200 || response.status > 299) {

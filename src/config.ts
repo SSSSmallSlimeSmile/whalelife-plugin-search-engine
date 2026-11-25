@@ -113,7 +113,7 @@ export function parseConfig(value: unknown): SurfConfig {
       if (entries.length > 8) throw new SurfError('config_invalid');
       const map: Record<string, number> = {};
       for (const [name, value] of entries) {
-        if (!isProvider(name, customs)) throw new SurfError('config_invalid');
+        if (!isProvider(name, customs) && !isScholarSource(name) && !isFactSource(name)) throw new SurfError('config_invalid');
         if (typeof value !== 'number' || !Number.isInteger(value) || value < 1000 || value > 60_000) throw new SurfError('config_invalid');
         map[name] = value;
       }
