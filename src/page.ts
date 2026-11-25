@@ -58,8 +58,8 @@ export const settingsPage = `<!doctype html>
 .chain-btns button{background:transparent;border:1px solid rgba(127,127,127,.3);color:inherit;border-radius:6px;padding:2px 7px;font-size:11px;cursor:pointer;font-family:inherit}
 .chain-btns button:hover{border-color:#7c5cff;color:#6d4aff}
 .chain-btns button:disabled{opacity:.4;cursor:default}
-.chain-btns button.danger{border-color:rgba(185,28,28,.28);color:#b91c1c}
-.chain-btns button.danger:hover{border-color:#b91c1c;color:#b91c1c;background:rgba(185,28,28,.06)}
+.chain-btns button.del-x{border-color:transparent;background:transparent;color:#9ca3af;font-size:15px;line-height:1;padding:2px 7px}
+.chain-btns button.del-x:hover{border-color:rgba(107,114,128,.4);color:#4b5563;background:rgba(107,114,128,.08)}
 .chain-add{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px}
 .presets{display:flex;flex-direction:column;gap:10px;margin-top:12px}
 .preset-group{display:grid;grid-template-columns:repeat(auto-fill,minmax(228px,1fr));gap:8px}
@@ -496,7 +496,7 @@ function renderRow(name, index) {
   weight.addEventListener("change", () => { weights[name] = Number(weight.value); });
   const btns = document.createElement("span"); btns.className = "chain-btns";
   const mk = (text, act, disabled, cls) => { const b = document.createElement("button"); b.type = "button"; b.textContent = text; b.dataset.act = act; b.dataset.name = name; b.disabled = Boolean(disabled); if (cls) b.className = cls; return b; };
-  btns.append(mk("\u5220\u9664", "del", chain.length <= 1, "danger"), mk("\u8bd5\u4e00\u4e0b", "probe", false));
+  const delBtn = mk("\u00d7", "del", chain.length <= 1, "del-x"); delBtn.title = "\u5220\u9664\u8fd9\u4e2a\u6765\u6e90"; btns.append(delBtn, mk("\u8bd5\u4e00\u4e0b", "probe", false));
   if (tier === 1 && list[0] === name) btns.append(standbyPick(name));
   const msg = document.createElement("span"); msg.className = "chain-msg"; btns.append(msg);
   row.append(grip, label, weight, order, btns);
