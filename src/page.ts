@@ -140,7 +140,6 @@ export const settingsPage = `<!doctype html>
 </style></head><body>
 <section class="panel"><div class="panel-header"><div class="pg-tabs">
 <button type="button" class="pg-tab on" data-goto="source">来源</button>
-<button type="button" class="pg-tab" data-goto="tools">工具</button>
 <button type="button" class="pg-tab" data-goto="scholar">学术</button>
 <button type="button" class="pg-tab" data-goto="facts">事实</button>
 <button type="button" class="pg-tab" data-goto="search">搜索</button>
@@ -192,7 +191,7 @@ export const settingsPage = `<!doctype html>
 <div class="pg-item"><input type="password" name="anysearchApiKey" id="anysearchApiKey" autocomplete="new-password"><p class="pg-hint" id="anyState"></p><input id="clearAnySearchApiKey" type="checkbox" name="clearAnySearchApiKey"></div>
 </div>
 
-<p class="pg-hint">拖 ≡ 调整顺序（可跨一级/二级），前一个失败才换下一个；第一个来源拿剩余预算的七成。「试一下」直连该来源一次，不改配置、不写回执。brave / tavily / exa 各要自己的 Key——点卡片右上角「⋯」打开设置（可拖动），没填 Key 的卡片会灰着；anysearch、github、huggingface 不带 Key 就能用。代理在「代理设置」里。</p></div>
+<p class="pg-hint">拖 ≡ 调整顺序（可跨一级/二级），前一个失败才换下一个；第一个来源拿剩余预算的七成。「试一下」直连该来源一次，不改配置、不写回执。brave / tavily / exa 各要自己的 Key——点卡片右上角「⋯」打开设置（可拖动），没填 Key 的卡片会灰着；anysearch 不带 Key 就能用。代理在「代理设置」里。</p></div>
 </div>
 <div class="pg-pair">
 <div class="pg-item"><label class="pg-row"><span class="pg-label">每次默认结果数</span><input type="number" name="resultsLimit" id="resultsLimit" min="1" max="10" required></label>
@@ -215,15 +214,6 @@ export const settingsPage = `<!doctype html>
 </div>
 </section>
 
-<section class="pg-group" id="pg-tools" hidden>
-<p class="pg-desc">这一类不是搜索引擎，是几个专用检索接口：查的是仓库和模型库，不是网页。它们不进来源链、不参与聚合——每次搜网页都顺带打一发仓库接口只会白花钱。要查就在这一页直接试。</p>
-<div class="pg-pair"><div class="pg-item"><span class="pg-label">查哪个</span>
-<select id="toolPick" class="chain-sel"><option value="github">github · 仓库</option><option value="huggingface">huggingface · 模型库</option></select></div>
-<div class="pg-item"><span class="pg-label">查询词</span><input type="text" id="toolQuery" class="chain-sel" placeholder="查询词，留空用 whalelife"></div></div>
-<div class="chain-add"><button class="btn" type="button" id="toolProbe">试一下</button><span class="chain-msg" id="toolMsg"></span></div>
-<p class="pg-hint">github 未登录每小时 60 次，超了会明说被限流；huggingface 按模型名和标签匹配，不是全文检索——搜「bert」有，搜一句话往往零条。两家都不需要 Key。</p>
-<div class="probe-out" id="toolOut" hidden></div>
-</section>
 
 <section class="pg-group" id="pg-search" hidden>
 <p class="pg-desc">整次搜索有一个总预算，单个来源分到的是它的一部分。垂直搜索参数 tag / params / zone / language 只对 anysearch 生效，其余来源会在回执里注明被忽略。</p>
@@ -456,7 +446,7 @@ document.addEventListener("change", (event) => {
 /** 主位能选的二级：排除自己和链上已有的（它们本来就在并发里打）。 */
 function standbyChoices(name) {
   const used = new Set(chain);
-  const all = STANDBY_OPTIONS.concat(customs.map(item => "custom:" + item.name));
+const STANDBY_OPTIONS = ["anysearch", "duckduckgo", "brave", "tavily", "exa"];
   return all.filter(item => item !== name && !used.has(item));
 }
 /** 主位那颗小标记：点开选一个回退来源。没设时显示 \u21ba，设了显示来源名。 */
@@ -806,7 +796,7 @@ let kpKind = "";
 let timeouts = {};
 /** 每源的二级：它没拿到结果时用谁顶上。键是来源名，值是另一家。 */
 let fallbacks = {};
-const STANDBY_OPTIONS = ["anysearch", "duckduckgo", "github", "huggingface", "brave", "tavily", "exa"];
+const STANDBY_OPTIONS = ["anysearch", "duckduckgo", "brave", "tavily", "exa"];
 let kpName = "";
 const kp = document.createElement("div");
 kp.className = "keypop";
@@ -1055,9 +1045,6 @@ byId("tagSel").onchange = () => {
   const skel = {};
   for (const k of req) skel[k] = "";
   byId("paramsInput").value = req.length ? JSON.stringify(skel) : "";
-};
-byId("toolProbe").onclick = () => {
-  probe({ provider: byId("toolPick").value, query: byId("toolQuery").value.trim() || undefined }, byId("toolMsg"));
 };
 
 byId("probeVertical").onclick = () => {

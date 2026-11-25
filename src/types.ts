@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  * Additional terms under AGPLv3 Section 7: see LICENSE-ADDITIONAL.
  */
-export type BuiltinProvider = 'duckduckgo' | 'brave' | 'anysearch' | 'tavily' | 'exa' | 'github' | 'huggingface';
+export type BuiltinProvider = 'duckduckgo' | 'brave' | 'anysearch' | 'tavily' | 'exa';
 /** 用户自己填的 JSON 来源统一挂 custom: 前缀，避免和内置名字撞。 */
 export type SearchProvider = BuiltinProvider | `custom:${string}`;
 export interface CustomSource {

@@ -36,7 +36,7 @@ const secrets = [
 ] as const;
 function isBuiltinProvider(value: unknown): value is Exclude<SearchProvider, `custom:${string}`> {
   return value === 'duckduckgo' || value === 'brave' || value === 'anysearch'
-    || value === 'tavily' || value === 'exa' || value === 'github' || value === 'huggingface';
+    || value === 'tavily' || value === 'exa';
 }
 function isProvider(value: unknown, customs: CustomSource[]): value is SearchProvider {
   if (isBuiltinProvider(value)) return true;

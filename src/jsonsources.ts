@@ -6,7 +6,7 @@ import { SurfError } from './errors.ts';
 import type { SearchItem } from './types.ts';
 
 /** 只吃公开 JSON 接口的来源：不解析别人的 HTML，改版也不会把解析器弄坏。 */
-export type JsonProvider = 'tavily' | 'exa' | 'github' | 'huggingface';
+export type JsonProvider = 'tavily' | 'exa';
 
 export interface JsonKeys { tavilyApiKey: string; exaApiKey: string }
 
@@ -18,7 +18,7 @@ export interface JsonRequest {
 const MAX_URL = 4096;
 
 export function isJsonSource(value: string): value is JsonProvider {
-  return value === 'tavily' || value === 'exa' || value === 'github' || value === 'huggingface';
+  return value === 'tavily' || value === 'exa';
 }
 
 function clipped(value: string, maximum: number): string {
@@ -70,71 +70,10 @@ export function buildJsonRequest(provider: JsonProvider, query: string, limit: n
       headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'x-api-key': keys.exaApiKey },
       body: JSON.stringify({ query, numResults: limit, contents: { text: { maxCharacters: 800 } } }) };
   }
-  if (provider === 'github') {
-    const url = new URL('https://api.github.com/search/repositories');
-    url.searchParams.set('q', query);
-    url.searchParams.set('per_page', String(limit));
-    // 默认头已经带 user-agent（GitHub 不带会 403），这里不再重复加——额外的头只认固定白名单。
-    return { url: url.href, method: 'GET', allowRedirects: true,
-      headers: { Accept: 'application/vnd.github+json' } };
-  }
-  const url = new URL('https://huggingface.co/api/models');
-  url.searchParams.set('search', query);
-  url.searchParams.set('limit', String(limit));
-  url.searchParams.set('sort', 'downloads');
-  url.searchParams.set('direction', '-1');
-  return { url: url.href, method: 'GET', allowRedirects: true, headers: { Accept: 'application/json' } };
+  throw new SurfError('search_unconfigured');
 }
 
 export function parseJsonSearch(provider: JsonProvider, body: Buffer, limit: number): SearchItem[] {
-  if (provider === 'github') {
-    const payload = parsed(body);
-    if (!payload || typeof payload !== 'object') throw new SurfError('search_parse');
-    const list = (payload as Record<string, unknown>).items;
-    if (!Array.isArray(list)) throw new SurfError('search_parse');
-    const results: SearchItem[] = [];
-    const seen = new Set<string>();
-    for (const raw of list) {
-      if (!raw || typeof raw !== 'object') continue;
-      const item = raw as Record<string, unknown>;
-      const url = safeUrl(item.html_url);
-      const title = flat(item.full_name, 300);
-      if (!url || !title || seen.has(url)) continue;
-      seen.add(url);
-      const extras: string[] = [];
-      const stars = item.stargazers_count;
-      if (typeof stars === 'number') extras.push('★' + stars);
-      const language = flat(item.language, 40);
-      if (language) extras.push(language);
-      const description = flat(item.description, 600);
-      results.push({ title, url, snippet: clipped([extras.join(' · '), description].filter(Boolean).join(' — '), 1200) });
-      if (results.length >= limit) break;
-    }
-    return results;
-  }
-  if (provider === 'huggingface') {
-    const payload = parsed(body);
-    if (!Array.isArray(payload)) throw new SurfError('search_parse');
-    const results: SearchItem[] = [];
-    const seen = new Set<string>();
-    for (const raw of payload) {
-      if (!raw || typeof raw !== 'object') continue;
-      const item = raw as Record<string, unknown>;
-      const id = flat(item.id, 200) || flat(item.modelId, 200);
-      if (!id) continue;
-      const url = safeUrl('https://huggingface.co/' + id);
-      if (!url || seen.has(url)) continue;
-      seen.add(url);
-      const extras: string[] = [];
-      const pipeline = flat(item.pipeline_tag, 60);
-      if (pipeline) extras.push(pipeline);
-      if (typeof item.downloads === 'number') extras.push(item.downloads + ' downloads');
-      if (typeof item.likes === 'number') extras.push(item.likes + ' likes');
-      results.push({ title: id, url, snippet: clipped(extras.join(' · '), 1200) });
-      if (results.length >= limit) break;
-    }
-    return results;
-  }
   if (provider === 'tavily') {
     const results: SearchItem[] = [];
     const seen = new Set<string>();
@@ -150,6 +89,7 @@ export function parseJsonSearch(provider: JsonProvider, body: Buffer, limit: num
     }
     return results;
   }
+  // exa：结果在 results[] 里，正文放 text。
   const results: SearchItem[] = [];
   const seen = new Set<string>();
   for (const raw of itemsOf(parsed(body))) {

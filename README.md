@@ -14,7 +14,7 @@ WhaleLife 交流 QQ 群：**962935021**
 - 直接给链接：`search_read` 读取公开 HTML / XHTML / 纯文字，返回来源地址、正文、链接和图片索引。搜索失败不影响读链接。正文每次最多 6000 个 UTF-16 单元，模型按 `pageRef` / `nextOffset` 继续读取；超过单页正文上限时标记 `truncated`。
 - 按需看图：开启可选视觉插件后，`search_image(pageRef,imageIndex)` 获取原图并交入当前可信会话，随后由 `vision_view(mediaRef)` 交给当前主模型。图片说明不是已看图，`offered` 也不代表已理解。不会自动收藏图片。视觉不可用只关闭取图接入，文字功能保留。
 - 按需收藏：开启可选图库后，AI 决定保留网页图片时调用 `search_collect(pageRef,imageIndex)`，从同一图片索引获取原图并经 `gallery.offerMedia` 取得图库引用，再调用现有 `gallery_collect({mediaRef,...})` 收藏。视觉引用与图库引用不能混用；准备引用不等于已收藏，不产生描述或向量。真正收藏仍遵守图库工具权限，是否完成以 `state:saved` 和后续任务结果为准。此功能不要求启用视觉；普通阅读和看图不向图库交入图片。
-- 更多来源：`github`（仓库搜索，未登录每小时 60 次）、`huggingface`（模型库，按模型名和标签匹配，不是全文检索）免 Key；`tavily`、`exa` 要各自的 API Key。这四个走公开 JSON 接口，不解析页面，页面改版不会把它们弄坏；没填 Key 的卡片在设置页里灰着，不会排进链里假装能用。
+- 更多来源：`tavily`、`exa`，各要自己的 API Key，走公开 JSON 接口、不解析页面。没填 Key 的卡片在设置页里灰着，不会排进链里假装能用。仓库搜索（GitHub API）和模型库检索（HuggingFace API）曾经也是这里的两家来源，现在已从来源链移除——它们查的不是网页，混进来只会让每次搜索多花一份请求。
 - 垂直搜索：`search_vertical` 必带 `tag`，另可带 `params` / `zone` / `language`，只对 anysearch 来源生效，其它来源会在回执的 `notes` 里注明被忽略。详见下面「垂直搜索」一节。
 - 子插件：父级声明 `console.groupChildren: true`。未来平台子插件放在 `plugins/search-engine/sub/<id>/`，声明 `depends: [search-engine]` 并使用公开服务；父停子停、子级独立启停及故障切割由宿主管理。首版没有附带 B 站、贴吧或其他平台子插件。
 
@@ -117,7 +117,7 @@ aggregate   elapsedMs=2007   groups 三家
 
 每条结果除了标题、链接、摘要，还带两个字段：
 
-- `via`：这条是怎么来的。`api` = 对方公开 JSON 接口（anysearch / brave / tavily / exa / github / huggingface）；`html` = 解析对方搜索页面（duckduckgo / bing）；`custom` = 自定义来源，字段映射由使用者自己填
+- `via`：这条是怎么来的。`api` = 对方公开 JSON 接口（anysearch / brave / tavily / exa）；`html` = 解析对方搜索页面（duckduckgo / bing）；`custom` = 自定义来源，字段映射由使用者自己填
 - `domain`：链接的主机名，去掉 `www.`；URL 解析不出来时这个字段不出现，不编一个
 
 顶层另有 `sourceKind`，就是这一家用的是哪一类。

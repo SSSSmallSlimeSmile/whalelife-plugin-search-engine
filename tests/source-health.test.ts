@@ -11,11 +11,11 @@ import type { PublicFetcher, SurfConfig } from '../src/types.ts';
 const input = { sessionId: 'test', query: 'health' };
 // 这一组测的是回退语义与冷却，跟“默认用哪种搜索方式”无关，所以把模式钉死。
 const base = {
-  ...defaults, searchMode: 'fallback', searchProviders: ['anysearch', 'github'], cacheSeconds: 0,
-  sourceFailThreshold: 2, sourceCooldownSeconds: 60,
+  ...defaults, searchMode: 'fallback', searchProviders: ['anysearch', 'tavily'], cacheSeconds: 0,
+  sourceFailThreshold: 2, sourceCooldownSeconds: 60, tavilyApiKey: 'k',
 } satisfies SurfConfig;
 const results = [{ title: 'First', url: 'https://example.org/a', snippet: 'A' }];
-const repo = { items: [{ full_name: 'a/b', html_url: 'https://github.com/a/b', stargazers_count: 1, description: 'd' }] };
+const tvly = { results: [{ title: 'T', url: 'https://example.org/g', content: 'C' }] };
 function reply(url: string, body: unknown, status = 200) {
   return { url, status, headers: {}, body: Buffer.from(JSON.stringify(body)) };
 }
@@ -32,11 +32,11 @@ function success<T>(value: { status: 'ok'; data: T } | { status: 'error'; error:
   if (value.status === 'error') assert.fail(JSON.stringify(value.error));
   return value.data;
 }
-/** 只区分两个来源：github 一定成功，其余当 anysearch。 */
+/** 只区分两个来源：tavily 一定成功，其余当 anysearch。 */
 function fetcher(hits: string[], shouldFail: () => boolean): PublicFetcher['get'] {
   return async url => {
     hits.push(url);
-    if (url.includes('github')) return reply(url, repo);
+    if (url.includes('tavily')) return reply(url, tvly);
     return shouldFail() ? reply(url, {}, 500) : reply(url, { results });
   };
 }
@@ -48,7 +48,7 @@ test('consecutive failures put a source on cooldown and it gets skipped', async 
   const surf = runtime(fetcher(hits, () => failing), {}, tick);
 
   const first = success(await surf.search({ ...input, query: 'q1' }));
-  assert.equal(first.provider, 'github');
+  assert.equal(first.provider, 'tavily');
   assert.equal(first.fallback?.[0].code, 'http_error');
 
   const second = success(await surf.search({ ...input, query: 'q2' }));
@@ -56,7 +56,7 @@ test('consecutive failures put a source on cooldown and it gets skipped', async 
 
   const before = hits.length;
   const third = success(await surf.search({ ...input, query: 'q3' }));
-  assert.equal(third.provider, 'github');
+  assert.equal(third.provider, 'tavily');
   assert.equal(third.fallback?.[0].code, 'source_cooling');
   assert.match(third.fallback?.[0].reason ?? '', /还剩 \d+ 秒/);
   assert.equal(hits.length - before, 1, '冷却中的来源不该再被请求');
@@ -98,15 +98,15 @@ test('zero results count as an answer, not a failure', async () => {
   const hits: string[] = [];
   const surf = runtime(async url => {
     hits.push(url);
-    if (url.includes('github')) return reply(url, repo);
+    if (url.includes('tavily')) return reply(url, tvly);
     return reply(url, { results: [] });
   }, {}, tick);
   for (const query of ['q1', 'q2', 'q3', 'q4']) {
     const data = success(await surf.search({ ...input, query }));
-    assert.equal(data.provider, 'github');
+    assert.equal(data.provider, 'tavily');
     assert.equal(data.fallback?.[0].code, 'search_empty');
   }
-  assert.equal(hits.filter(url => !url.includes('github')).length, 4, '零条结果不该把来源关进冷却');
+  assert.equal(hits.filter(url => !url.includes('tavily')).length, 4, '零条结果不该把来源关进冷却');
 });
 
 test('cooldown can be turned off with sourceCooldownSeconds: 0', async () => {
@@ -117,7 +117,7 @@ test('cooldown can be turned off with sourceCooldownSeconds: 0', async () => {
     const data = success(await surf.search({ ...input, query }));
     assert.equal(data.fallback?.[0].code, 'http_error');
   }
-  assert.equal(hits.filter(url => !url.includes('github')).length, 4);
+  assert.equal(hits.filter(url => !url.includes('tavily')).length, 4);
 });
 
 test('when every source is cooling, all are still tried instead of returning nothing', async () => {
