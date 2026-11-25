@@ -164,15 +164,24 @@ test('fallback reports its first timeout and gives the next source only the rema
 
 test('settings restore both the checked cards and their saved order', () => {
   const script = settingsPage.slice(settingsPage.indexOf('function restoreSourceOrder('), settingsPage.indexOf('function syncSrcCards('));
-  const grid = { append(card: string) { order.splice(order.indexOf(card), 1); order.push(card); } };
-  const order = ['first', 'second', 'third'];
-  const boxes = order.map(value => ({ value, checked: value === 'second', closest: () => ({ parentElement: {
-    append() { grid.append(value); },
-  } }) }));
+  // 桩要撑起 restoreSourceOrder 现在真用到的三样：closest('.src-grid')、grid.querySelectorAll('.src-card')、grid.append(card)。
+  // 只给 parentElement.append 撑不住全量稳定重排，会误报成产品坏了。
+  const cards: any[] = [];
+  const grid: any = {
+    querySelectorAll: () => cards.slice(),
+    querySelector: () => null,
+    append(card: any) { const at = cards.indexOf(card); if (at >= 0) cards.splice(at, 1); cards.push(card); },
+  };
+  const boxes = ['first', 'second', 'third'].map(value => {
+    const box: any = { value, checked: value === 'second', closest: () => grid };
+    cards.push({ value, querySelector: (sel: string) => sel.includes('checkbox') ? box : null });
+    return box;
+  });
   runInNewContext(script + '\nrestoreSourceOrder(".source", ["third", "first", "unknown"]);',
     { document: { querySelectorAll: () => boxes } });
-  assert.deepEqual(order.filter(name => boxes.find(box => box.value === name)?.checked), ['third', 'first']);
-  assert.equal(boxes[1].checked, false);
+  // 存盘顺序排前面，没列进去的保持原相对顺序排后面；勾选只认列表里有的。
+  assert.deepEqual(cards.map(card => card.value), ['third', 'first', 'second']);
+  assert.deepEqual(cards.filter(card => card.querySelector('input[type=checkbox]').checked).map(card => card.value), ['third', 'first']);
 });
 
 test('saving and recreating the plugin reconciles both tools and reports registration failures', async () => {
