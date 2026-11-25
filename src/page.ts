@@ -166,7 +166,7 @@ export const settingsPage = `<!doctype html>
 <p class="pg-hint">只在请求 anysearch 时作为默认 zone；单次搜索可以用 search_vertical 的 zone 参数覆盖。</p></div>
 </div>
 <div class="pg-pair">
-<div class="pg-item"><label class="pg-row"><span class="pg-label">搜索方式</span><select name="searchMode" id="searchMode"><option value="fallback">顺序回退（省，一次只打一家）</option><option value="aggregate">聚合并发（全，几家同时打、分段列出）</option></select></label>
+<div class="pg-item"><label class="pg-row"><span class="pg-label">搜索方式</span><select name="searchMode" id="searchMode"><option value="hybrid">首位为主 + 其余并发（首位没拿到结果时主位按链顺序顺延，不额外发请求）</option><option value="aggregate">聚合并发（默认；全，几家同时打、分段列出，不分主次）</option><option value="fallback">顺序回退（省，一次只打一家，拿到就停）</option></select></label>
 <p class="pg-hint">回退：按来源链一家家试，前一家失败才换下一家，拿到结果就停——一次只付一份开销。聚合：链上所有来源同时发请求，各自成段原样列出，不排序、不合并，只标出重复（同一条链接被几家给出的，后来的带 dupOf，顶层给 overlap）。聚合的结果在回执的 groups 里，顶层 results 为空。开销是几倍，换来的是"一家漏了另一家能补上"。</p></div>
 </div>
 <div class="pg-pair">
@@ -668,6 +668,9 @@ const CLEAR_FIELD = { brave: "clearBraveApiKey", tavily: "clearTavilyApiKey", ex
 let kpKind = "";
 /** 每源超时：key 是来源名（自定义写 custom:名字），值是毫秒。 */
 let timeouts = {};
+/** 每源的二级：它没拿到结果时用谁顶上。键是来源名，值是另一家。 */
+let fallbacks = {};
+const STANDBY_OPTIONS = ["anysearch", "duckduckgo", "github", "huggingface", "brave", "tavily", "exa"];
 let kpName = "";
 const kp = document.createElement("div");
 kp.className = "keypop";
@@ -677,7 +680,8 @@ kp.innerHTML = '<div class="kp-head"><b id="kpTitle"></b><span id="kpState"></sp
   + '<div class="kp-body"><div id="kpKeyWrap"><input id="kpInput" type="password" autocomplete="off" spellcheck="false">'
   + '<label class="kp-check"><input id="kpClearChk" type="checkbox"><span id="kpClearLabel">清除</span></label></div></div>'
   + '<div class="kp-body" id="kpTimeWrap"><label class="kp-check"><span>最多等多久（秒，留空按默认分配）</span><input id="kpTimeout" type="number" min="1" max="60" step="1"></label></div>'
-  + '<div class="kp-actions"><button type="button" id="kpAdd" hidden>加入来源链</button><button type="button" id="kpTimeSave" hidden>存超时</button><button type="button" class="primary" id="kpSave">保存</button><button type="button" id="kpCancel">取消</button></div>'
+  + '<div class="kp-body" id="kpStandbyWrap"><label class="kp-check"><span>这家没拿到结果时用谁顶上</span><select id="kpStandby"></select></label></div>'
+  + '<div class="kp-actions"><button type="button" id="kpAdd" hidden>加入来源链</button><button type="button" id="kpTimeSave" hidden>存超时</button><button type="button" id="kpStandbySave" hidden>存二级</button><button type="button" class="primary" id="kpSave">保存</button><button type="button" id="kpCancel">取消</button></div>'
   + '<div class="kp-msg" id="kpMsg"></div>';
 document.body.append(kp);
 makeDraggable(kp, kp.querySelector(".kp-head"));
@@ -769,6 +773,17 @@ function openSourcePop(name, card) {
   if (timeSave) timeSave.hidden = false;
   const timeInput = kp.querySelector("#kpTimeout");
   if (timeInput) timeInput.value = timeouts[name] ? String(timeouts[name] / 1000) : "";
+  const sbWrap = kp.querySelector("#kpStandbyWrap");
+  const sbSel = kp.querySelector("#kpStandby");
+  const sbSave = kp.querySelector("#kpStandbySave");
+  if (sbWrap && sbSel) {
+    sbWrap.hidden = false;
+    if (sbSave) sbSave.hidden = false;
+    const current = fallbacks[name] || "";
+    sbSel.innerHTML = '<option value="">（不设二级）</option>'
+      + STANDBY_OPTIONS.filter(item => item !== name).map(item => '<option value="' + item + '">' + item + '</option>').join("");
+    sbSel.value = current && current !== name && STANDBY_OPTIONS.includes(current) ? current : "";
+  }
   kpMsg("");
   placeKeyPop(card);
   if (hasField) input.focus({ preventScroll: true });
@@ -789,6 +804,10 @@ function openProxyPop(anchor) {
   if (timeWrapP) timeWrapP.hidden = true;
   const timeSaveP = kp.querySelector("#kpTimeSave");
   if (timeSaveP) timeSaveP.hidden = true;
+  const sbWrapP = kp.querySelector("#kpStandbyWrap");
+  if (sbWrapP) sbWrapP.hidden = true;
+  const sbSaveP = kp.querySelector("#kpStandbySave");
+  if (sbSaveP) sbSaveP.hidden = true;
   kpMsg("");
   placeKeyPop(anchor);
   input.focus({ preventScroll: true });
@@ -843,6 +862,14 @@ kp.querySelector("#kpTimeSave").onclick = () => {
   const seconds = Number(raw);
   if (!Number.isFinite(seconds) || seconds < 1 || seconds > 60) { kpMsg("超时填 1 到 60 秒", true); return; }
   timeouts[name] = Math.round(seconds * 1000);
+  submitPage();
+};
+kp.querySelector("#kpStandbySave").onclick = () => {
+  const name = kpName;
+  if (!name) return;
+  const sel = kp.querySelector("#kpStandby");
+  const value = sel ? sel.value : "";
+  if (value) fallbacks[name] = value; else delete fallbacks[name];
   submitPage();
 };
 kp.querySelector("#kpCancel").onclick = closeKeyPop;
@@ -917,11 +944,12 @@ function show(data) {
   renderKindCustoms("fact");
   chain = [...c.searchProviders];
   timeouts = { ...(c.sourceTimeouts || {}) };
+  fallbacks = { ...(c.providerFallbacks || {}) };
   renderChain();
   for (const id of ["resultsLimit", "resultsMaxChars", "concurrency", "maxTextChars", "referenceTtlSeconds", "cacheSeconds", "sourceFailThreshold", "sourceCooldownSeconds"]) byId(id).value = c[id];
   byId("structuredRead").checked = c.structuredRead === true;
   byId("anysearchZone").value = c.anysearchZone;
-  byId("searchMode").value = c.searchMode === "aggregate" ? "aggregate" : "fallback";
+  byId("searchMode").value = c.searchMode === "hybrid" ? "hybrid" : c.searchMode === "aggregate" ? "aggregate" : "fallback";
   byId("timeoutSeconds").value = c.timeoutMs / 1000;
   byId("pageKiB").value = c.maxPageBytes / 1024;
   byId("imageKiB").value = c.maxImageBytes / 1024;
@@ -1117,7 +1145,9 @@ byId("f").onsubmit = async (event) => {
   config.searchProviders = chain.slice();
   config.sourceTimeouts = { ...timeouts };
   config.anysearchZone = byId("anysearchZone").value;
-  config.searchMode = byId("searchMode").value === "aggregate" ? "aggregate" : "fallback";
+  const modeValue = byId("searchMode").value;
+  config.searchMode = modeValue === "hybrid" ? "hybrid" : modeValue === "aggregate" ? "aggregate" : "fallback";
+  config.providerFallbacks = { ...fallbacks };
   config.timeoutMs = Number(byId("timeoutSeconds").value) * 1000;
   config.maxPageBytes = Number(byId("pageKiB").value) * 1024;
   config.maxImageBytes = Number(byId("imageKiB").value) * 1024;

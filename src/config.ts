@@ -9,7 +9,7 @@ import { isFactSource } from './facts.ts';
 export const MAX_PROVIDERS = 6;
 export const defaults: SurfConfig = {
   searchProviders: ['anysearch'], searchMode: 'aggregate', braveApiKey: '', tavilyApiKey: '', exaApiKey: '', anysearchApiKey: '', anysearchZone: 'cn',
-  proxyUrl: '', timeoutMs: 20_000, sourceTimeouts: {},
+  proxyUrl: '', timeoutMs: 20_000, sourceTimeouts: {}, providerFallbacks: {},
   maxPageBytes: 2 * 1024 * 1024, maxImageBytes: 8 * 1024 * 1024,
   maxTextChars: 60_000, resultsLimit: 5, structuredRead: true, resultsMaxChars: 8000, referenceTtlSeconds: 600, concurrency: 3, cacheSeconds: 300, sourceFailThreshold: 2, sourceCooldownSeconds: 60,
   scholarEnabled: false, scholarSources: ['arxiv', 'openalex', 'crossref'], scholarMailto: '',
@@ -131,6 +131,19 @@ export function parseConfig(value: unknown): SurfConfig {
       }
       result.sourceTimeouts = map;
     }
+    if (input.providerFallbacks !== undefined) {
+      const raw = input.providerFallbacks;
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new SurfError('config_invalid');
+      const entries = Object.entries(raw as Record<string, unknown>);
+      if (entries.length > MAX_PROVIDERS) throw new SurfError('config_invalid');
+      const map: Record<string, string> = {};
+      for (const [from, to] of entries) {
+        if (typeof to !== 'string' || !isProvider(to, customs)) throw new SurfError('config_invalid');
+        if (!isProvider(from, customs) || from === to) throw new SurfError('config_invalid');
+        map[from] = to;
+      }
+      result.providerFallbacks = map;
+    }
     for (const key of Object.keys(limits) as (keyof typeof limits)[]) {
       if (input[key] === undefined) continue;
       const value = input[key], [low, high] = limits[key];
@@ -138,7 +151,7 @@ export function parseConfig(value: unknown): SurfConfig {
       result[key] = value;
     }
     if (input.searchMode !== undefined) {
-      if (input.searchMode !== 'fallback' && input.searchMode !== 'aggregate') throw new SurfError('config_invalid');
+      if (input.searchMode !== 'fallback' && input.searchMode !== 'aggregate' && input.searchMode !== 'hybrid') throw new SurfError('config_invalid');
       result.searchMode = input.searchMode;
     }
     if (input.structuredRead !== undefined) {

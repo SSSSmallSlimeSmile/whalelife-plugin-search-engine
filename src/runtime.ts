@@ -334,8 +334,9 @@ export class SurfRuntime implements SurfService {
       if (!Number.isInteger(limit) || limit < 1 || limit > 10) throw new SurfError('invalid_input');
       const providers = config.searchProviders;
       const vertical = verticalOf(input);
-      // 聚合模式：并发打全链，分段列出，不排序。见 searchAggregated。
-      if (config.searchMode === 'aggregate') return this.searchAggregated(input.query.trim(), limit, vertical, signal, config);
+      // 聚合 / 混合：并发打全链，分段列出，不排序。见 searchAggregated。
+      if (config.searchMode === 'aggregate' || config.searchMode === 'hybrid')
+        return this.searchAggregated(input.query.trim(), limit, vertical, signal, config, config.searchMode === 'hybrid');
       const cacheKey = this.cacheKey('search', [input.query.trim(), limit, providers, vertical]);
       const cached = this.cacheGet<SearchData>(cacheKey);
       if (cached) return { ...cached.data, cached: true, cachedAgoMs: cached.agoMs };
@@ -401,9 +402,10 @@ export class SurfRuntime implements SurfService {
    * 唯一做的是标重复：同一条 URL 被两家给出时，后来的那条带 dupOf，顶层给 overlap。
    * 条目都在 groups 里，顶层 results 留空，免得同一批内容在回执里出现两遍。
    */
-  private async searchAggregated(query: string, limit: number, vertical: ReturnType<typeof verticalOf>, signal: AbortSignal, config: SurfConfig): Promise<SearchData> {
+  private async searchAggregated(query: string, limit: number, vertical: ReturnType<typeof verticalOf>, signal: AbortSignal, config: SurfConfig, hybrid = false): Promise<SearchData> {
     const providers = config.searchProviders;
-    const cacheKey = this.cacheKey('search-agg', [query, limit, providers, vertical]);
+    const mode = hybrid ? 'hybrid' as const : 'aggregate' as const;
+    const cacheKey = this.cacheKey('search-agg', [query, limit, providers, vertical, mode]);
     const cached = this.cacheGet<SearchData>(cacheKey);
     if (cached) return { ...cached.data, cached: true, cachedAgoMs: cached.agoMs };
     const notes: string[] = [];
@@ -411,26 +413,59 @@ export class SurfRuntime implements SurfService {
       notes.push('聚合模式下 tag/zone/language 只对 anysearch 生效，其它来源会忽略。');
     const started = performance.now();
     const forceAll = providers.every(name => this.coolingLeft(name) > 0);
+    // 打一次；失败不抛，交给调用方决定要不要用二级顶上。
+    const attempt = async (name: SearchProvider, budgetMs: number): Promise<{ results: SearchItem[]; elapsedMs: number; error?: { code: string; reason: string } }> => {
+      const at = performance.now();
+      const limitSignal = AbortSignal.timeout(Math.max(1, budgetMs));
+      const attemptSignal = AbortSignal.any([signal, limitSignal]);
+      try {
+        const results = await untilCancelled(attemptSignal, () => this.searchSource(name, query, limit, attemptSignal, budgetMs, vertical, config));
+        if (limitSignal.aborted) throw new SurfError('timeout');
+        return { results, elapsedMs: Math.round(performance.now() - at) };
+      } catch (error) {
+        if (signal.aborted) throw new SurfError('cancelled');
+        const failure = safeError(limitSignal.aborted || performance.now() - at >= budgetMs ? new SurfError('timeout') : error);
+        return { results: [], elapsedMs: Math.round(performance.now() - at), error: { code: failure.code, reason: failure.message } };
+      }
+    };
     const runs = providers.map(async (provider): Promise<AggregateGroup> => {
       const cooling = forceAll ? 0 : this.coolingLeft(provider);
       if (cooling > 0) return { provider, elapsedMs: 0, results: [], skipped: '上次连续失败，冷却中，还剩 ' + cooling + ' 秒' };
-      const at = performance.now();
-      const timeoutMs = Math.min(config.sourceTimeouts[provider] ?? config.timeoutMs, config.timeoutMs);
-      const limitSignal = AbortSignal.timeout(Math.max(1, timeoutMs));
-      const attemptSignal = AbortSignal.any([signal, limitSignal]);
-      try {
-        const results = await untilCancelled(attemptSignal, () => this.searchSource(provider, query, limit, attemptSignal, timeoutMs, vertical, config));
-        if (limitSignal.aborted) throw new SurfError('timeout');
+      const budget = Math.min(config.sourceTimeouts[provider] ?? config.timeoutMs, config.timeoutMs);
+      const main = await attempt(provider, budget);
+      if (!main.error && main.results.length > 0) {
         this.noteSourceSuccess(provider);
-        const trimmed = trimResults(annotate(results, provider), config.resultsMaxChars);
-        return { provider, sourceKind: kindOf(provider), elapsedMs: Math.round(performance.now() - at), results: trimmed.results,
+        const trimmed = trimResults(annotate(main.results, provider), config.resultsMaxChars);
+        return { provider, sourceKind: kindOf(provider), elapsedMs: main.elapsedMs, results: trimmed.results,
           ...(trimmed.truncated ? { truncated: trimmed.truncated } : {}) };
-      } catch (error) {
-        if (signal.aborted) throw new SurfError('cancelled');
-        const failure = safeError(limitSignal.aborted || performance.now() - at >= timeoutMs ? new SurfError('timeout') : error);
-        this.noteSourceFailure(config, provider, failure.code);
-        return { provider, elapsedMs: Math.round(performance.now() - at), results: [], error: { code: failure.code, reason: failure.message } };
       }
+      // 没拿到结果。失败要记健康；零条算应答，不记账。
+      if (main.error) this.noteSourceFailure(config, provider, main.error.code);
+      const why = main.error ?? { code: 'search_empty', reason: '来源返回零条结果。' };
+      const secondary = config.providerFallbacks[provider];
+      if (!secondary) return { provider, elapsedMs: main.elapsedMs, results: [], error: why };
+      if (providers.includes(secondary as SearchProvider)) {
+        notes.push(provider + ' 没拿到结果，二级来源 ' + secondary + ' 已经在链上并发打过，这次不重打，看它那一段。');
+        return { provider, elapsedMs: main.elapsedMs, results: [], error: why,
+          standby: { provider: secondary, elapsedMs: 0, reason: why.reason + '（二级已在链上，没有重打）' } };
+      }
+      const backupBudget = Math.min(config.sourceTimeouts[secondary] ?? config.timeoutMs, config.timeoutMs);
+      const backup = await attempt(secondary as SearchProvider, backupBudget);
+      const total = main.elapsedMs + backup.elapsedMs;
+      if (backup.error) {
+        this.noteSourceFailure(config, secondary, backup.error.code);
+        return { provider, elapsedMs: total, results: [], error: why,
+          standby: { provider: secondary, elapsedMs: backup.elapsedMs, reason: why.reason, error: backup.error } };
+      }
+      if (backup.results.length === 0) {
+        return { provider, elapsedMs: total, results: [], error: why,
+          standby: { provider: secondary, elapsedMs: backup.elapsedMs, reason: why.reason, error: { code: 'search_empty', reason: '二级来源也返回零条。' } } };
+      }
+      this.noteSourceSuccess(secondary);
+      const trimmed = trimResults(annotate(backup.results, secondary as SearchProvider), config.resultsMaxChars);
+      return { provider, sourceKind: kindOf(secondary as SearchProvider), elapsedMs: total, results: trimmed.results,
+        ...(trimmed.truncated ? { truncated: trimmed.truncated } : {}), error: why,
+        standby: { provider: secondary, elapsedMs: backup.elapsedMs, reason: why.reason } };
     });
     const groups = await Promise.all(runs);
     if (signal.aborted) throw new SurfError('cancelled');
@@ -461,13 +496,32 @@ export class SurfRuntime implements SurfService {
       }
     }
     if (!groups.some(group => group.results.length > 0)) {
-      const why = groups.map(group => group.provider + (group.error ? ' (' + group.elapsedMs + ' ms): ' + group.error.reason
-        : group.skipped ? '：' + group.skipped : '：零条')).join(' ');
+      // 二级也失败时，它的原因同样要带出来，否则读的人只看到原来那家为什么挂。
+      const why = groups.map(group => {
+        const head = group.provider + (group.error ? ' (' + group.elapsedMs + ' ms): ' + group.error.reason
+          : group.skipped ? '：' + group.skipped : '：零条');
+        return group.standby?.error ? head + '；二级 ' + group.standby.provider + '：' + group.standby.error.reason : head;
+      }).join(' ');
       throw new SearchExhaustedError('search_exhausted', why);
     }
-    const data: SearchData = { provider: 'aggregate', mode: 'aggregate', groups, results: [], overlap: overlap, untrusted: true,
+    const data: SearchData = { provider: 'aggregate', mode, groups, results: [], overlap: overlap, untrusted: true,
       elapsedMs: Math.round(performance.now() - started),
       ...(notes.length ? { notes } : {}) };
+    // 混合：链上顺序就是主次顺序。第一个给出结果的当主，前面的几家记下为什么没顶上。
+    if (hybrid) {
+      const index = groups.findIndex(group => group.results.length > 0);
+      const pick = index >= 0 ? groups[index] : undefined;
+      if (pick) {
+        data.primary = pick.provider;
+        const ahead: SearchFailure[] = groups.slice(0, index).map(group => ({
+          provider: group.provider as SearchProvider,
+          elapsedMs: group.elapsedMs,
+          code: group.error?.code ?? (group.skipped ? 'source_cooling' : 'search_empty'),
+          reason: group.error?.reason ?? group.skipped ?? '来源返回零条结果。',
+        }));
+        if (ahead.length) data.primaryFallback = ahead;
+      }
+    }
     this.cachePut(config, signal, cacheKey, data);
     return data;
   }

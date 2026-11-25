@@ -30,8 +30,10 @@ export interface SurfConfig {
   /**
    * fallback（默认）：一条有序链，前一家失败才换下一家，拿到结果就停。
    * aggregate：并发打链上所有来源，各自成段原样列出，不排序、不合并。
+   * hybrid：同样并发出全部来源，但链上首位是“主”。主失败或零条时，主位按链顺序顺延到
+   *         下一个有结果的来源——不再发请求，结果本来就在手上，只是“谁代表这次搜索”变了。
    */
-  searchMode: 'fallback' | 'aggregate';
+  searchMode: 'fallback' | 'aggregate' | 'hybrid';
   searchProviders: SearchProvider[];
   braveApiKey: string;
   tavilyApiKey: string;
@@ -42,6 +44,11 @@ export interface SurfConfig {
   timeoutMs: number;
   /** 每个来源单独的上限（毫秒）。没写的来源按整体预算分配。 */
   sourceTimeouts: Record<string, number>;
+  /**
+   * 每个来源自己的二级：它没拿到结果（失败，或连上但零条）时改用这一家。
+   * 只顶一层——顶上的那家自己不再触发它的二级，免得绕成环。
+   */
+  providerFallbacks: Record<string, string>;
   /** 成功结果的缓存秒数，0 = 不缓存。三种搜索共用这个值。 */
   cacheSeconds: number;
   sourceFailThreshold: number;
@@ -171,6 +178,11 @@ export interface AggregateGroup {
   error?: { code: string; reason: string };
   /** 冷却中被跳过，没发请求。 */
   skipped?: string;
+  /**
+   * 这家自己没拿到结果、改用二级顶上时记在这里；此时 results 是二级给的。
+   * reason 是原来那家为什么没顶上；error 是二级自己也失败时的原因。
+   */
+  standby?: { provider: string; elapsedMs: number; reason: string; error?: { code: string; reason: string } };
 }
 
 export interface SearchFailure { provider: SearchProvider; elapsedMs: number; code: string; reason: string }
@@ -181,7 +193,11 @@ export interface SearchData {
   groups?: AggregateGroup[];
   /** 聚合模式：被两家以上来源给出的同一个 URL 有几个。全一样就说明聚合白花了钱。 */
   overlap?: number;
-  mode?: 'fallback' | 'aggregate';
+  /** hybrid：这次代表整轮搜索的是哪一家。首位成功时就是首位本身。 */
+  primary?: string;
+  /** hybrid：主位顺延过——排在前面的几家各自为什么没顶上。首位成功时不出现这个字段。 */
+  primaryFallback?: SearchFailure[];
+  mode?: 'fallback' | 'aggregate' | 'hybrid';
   /** 采用的那家来源属于哪一类；见 SearchItem.via。 */
   sourceKind?: SourceKind;
   /** 因总量上限被丢掉的条目数；没丢就不出现这个字段。 */

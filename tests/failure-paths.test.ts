@@ -15,7 +15,8 @@ import { SurfRuntime } from '../src/runtime.ts';
 import type { PublicFetcher, SurfConfig, SurfService } from '../src/types.ts';
 
 const input = { sessionId: 'test', query: 'test' };
-const base = { ...defaults, searchProviders: ['anysearch'] } satisfies SurfConfig;
+// 这组测失败路径与回退，模式钉死成 fallback，免得跟着默认值漂。
+const base = { ...defaults, searchMode: 'fallback', searchProviders: ['anysearch'] } satisfies SurfConfig;
 const results = [
   { title: 'First', url: 'https://example.org/a', snippet: 'A😀' + '"'.repeat(120) },
   { title: 'Second', url: 'https://example.org/b', snippet: 'Second result' },

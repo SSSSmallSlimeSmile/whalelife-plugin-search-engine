@@ -9,8 +9,9 @@ import { SurfRuntime } from '../src/runtime.ts';
 import type { PublicFetcher, SurfConfig } from '../src/types.ts';
 
 const input = { sessionId: 'test', query: 'health' };
+// 这一组测的是回退语义与冷却，跟“默认用哪种搜索方式”无关，所以把模式钉死。
 const base = {
-  ...defaults, searchProviders: ['anysearch', 'github'], cacheSeconds: 0,
+  ...defaults, searchMode: 'fallback', searchProviders: ['anysearch', 'github'], cacheSeconds: 0,
   sourceFailThreshold: 2, sourceCooldownSeconds: 60,
 } satisfies SurfConfig;
 const results = [{ title: 'First', url: 'https://example.org/a', snippet: 'A' }];
