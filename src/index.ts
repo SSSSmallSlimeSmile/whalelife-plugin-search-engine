@@ -20,7 +20,7 @@ export async function applyWithDependencies(ctx: Context, dependencies: Dependen
   let config: SurfConfig = { ...defaults }, configValid = true, configError = '', pendingReload = false;
   try { config = parseConfig(await ctx.config.read()); } catch (error) {
     configValid = false;
-    configError = error instanceof SurfError ? error.message : '';
+    configError = error instanceof SurfError ? error.message : '无法读取插件配置。';
   }
   if (ctx.signal.aborted) return;
   const transient = typeof ctx.tools.registerTransient === 'function';
@@ -261,8 +261,8 @@ export async function applyWithDependencies(ctx: Context, dependencies: Dependen
   ctx.web.api('/plugins/search-engine/api', wrap(async (req, res, { signal }) => {
     if (req.method !== 'POST') { res.statusCode = 405; res.end(); return; }
     const expected = expectedTokenDigest;
-    if (!expected) throw new ProviderError('api_disabled', runtime.status().configError
-      ? `读配置失败，整份回退到默认值，令牌因此为空：${runtime.status().configError}` : '');
+    // 令牌为空就是关着。配置坏没坏属于本机的事，未鉴权的调用方不需要知道。
+    if (!expected) throw new ProviderError('api_disabled', '');
     const authorizationCount = req.headersDistinct?.authorization?.length
       ?? req.rawHeaders?.filter((name, index) => index % 2 === 0 && name.toLowerCase() === 'authorization').length;
     if (authorizationCount !== undefined && authorizationCount !== 1) throw new SurfError('api_unauthorized');
