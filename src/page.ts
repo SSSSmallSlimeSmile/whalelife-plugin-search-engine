@@ -263,7 +263,8 @@ export const settingsPage = `<!doctype html>
 <p class="pg-hint" style="margin-top:0">别的程序（脚本、别的 agent）可以按令牌调 search / scholar / facts / status。不开放“读网页”——那等于把任意 URL 的出口借出去。令牌空着就是不开放，填了立刻生效，清空立刻关。</p></div>
 <div class="pg-pair">
 <div class="pg-item"><label class="pg-row"><span class="pg-label">令牌（16–128 位字母数字）</span><input type="text" name="apiToken" id="apiToken" autocomplete="off" placeholder="留空 = 不开放"></label>
-<p class="pg-hint">明文存盘，页面能看能改。谁拿到都能花你的额度，随时清空即可关闭。</p></div>
+<p class="pg-hint">存盘后页面不再显示明文，只显示「已设置」。谁拿到都能花你的额度，勾下面那个再保存即可关闭。</p>
+<label class="pg-row" style="margin-top:6px"><input type="checkbox" id="apiTokenClear"> <span>清掉已设的令牌（等于关闭对外接口）</span></label></div>
 <div class="pg-item"><span class="pg-label">生成一个</span>
 <p class="pg-hint" style="margin-top:0"><button type="button" class="btn" id="apiGen">随机生成</button> 生成完要点右上角「保存」才落盘。</p></div>
 </div>
@@ -1110,7 +1111,9 @@ function show(data) {
   byId("factsLang").value = c.factsLang || "zh";
   restoreSourceOrder(".fact-src", c.factsSources || []);
   syncSrcCards();
-  byId("apiToken").value = c.apiToken || "";
+  byId("apiToken").value = "";
+  byId("apiTokenClear").checked = false;
+  byId("apiToken").placeholder = c.hasApiToken ? "已设置，留空则不变" : "留空 = 不开放";
   byId("save").disabled = false;
 }
 
@@ -1318,6 +1321,7 @@ byId("factProbe").onclick = async () => {
 byId("apiGen").onclick = () => {
   const bytes = new Uint8Array(18);
   crypto.getRandomValues(bytes);
+  byId("apiTokenClear").checked = false;
   byId("apiToken").value = Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
   byId("apiToken").focus();
 };
@@ -1351,7 +1355,11 @@ byId("f").onsubmit = async (event) => {
   });
   config.factsCustomSources = factCustoms.map(plainCustom);
   config.structuredRead = byId("structuredRead").checked;
-  config.apiToken = byId("apiToken").value.trim();
+  {
+    const token = byId("apiToken").value.trim();
+    if (byId("apiTokenClear").checked) config.apiToken = "";
+    else if (token) config.apiToken = token;
+  }
   config.scholarEnabled = byId("scholarEnabled").checked;
   config.scholarMailto = byId("scholarMailto").value.trim();
   config.scholarSources = [...document.querySelectorAll(".scholar-src")].filter(box => box.checked).map(box => box.value);

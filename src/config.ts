@@ -229,14 +229,14 @@ export function parseConfig(value: unknown): SurfConfig {
   } catch { throw new SurfError('config_invalid'); }
 }
 export function publicConfig(config: SurfConfig): PublicConfig {
-  const { braveApiKey, anysearchApiKey, tavilyApiKey, exaApiKey, proxyUrl, semanticScholarApiKey, ...rest } = config;
+  const { braveApiKey, anysearchApiKey, tavilyApiKey, exaApiKey, proxyUrl, semanticScholarApiKey, apiToken, ...rest } = config;
   return { ...rest, searchProviders: [...rest.searchProviders], searchProvider: rest.searchProviders[0],
     customSources: config.customSources.map(({ key, ...rest2 }) => ({ ...rest2, hasKey: Boolean(key) })),
     scholarCustomSources: config.scholarCustomSources.map(({ key, ...rest2 }) => ({ ...rest2, hasKey: Boolean(key) })),
     factsCustomSources: config.factsCustomSources.map(({ key, ...rest2 }) => ({ ...rest2, hasKey: Boolean(key) })),
     hasBraveApiKey: Boolean(braveApiKey), hasAnySearchApiKey: Boolean(anysearchApiKey),
     hasTavilyApiKey: Boolean(tavilyApiKey), hasExaApiKey: Boolean(exaApiKey), hasProxy: Boolean(proxyUrl),
-    hasSemanticScholarApiKey: Boolean(semanticScholarApiKey) };
+    hasSemanticScholarApiKey: Boolean(semanticScholarApiKey), hasApiToken: Boolean(apiToken) };
 }
 export function updateConfig(value: unknown, current: SurfConfig): SurfConfig {
   const input = { ...object(value) };

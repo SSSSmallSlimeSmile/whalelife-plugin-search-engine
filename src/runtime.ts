@@ -375,11 +375,23 @@ export class SurfRuntime implements SurfService {
   }
   /** 存一份完整结果集。过期时间跟页面引用一致，过了再翻页就报 page_unavailable。 */
   private saveSet(session: string, groups: AggregateGroup[]): { id: string; total: number } {
-    const id = 'set_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-3);
+    const id = 'set_' + randomUUID();
     while (this.sets.size >= 32) { const oldest = this.sets.keys().next(); if (oldest.done) break; this.sets.delete(oldest.value); }
     const copy = JSON.parse(JSON.stringify(groups)) as AggregateGroup[];
     this.sets.set(id, { sessionId: session, expires: this.now() + this.config.referenceTtlSeconds * 1000, groups: copy, served: [] });
     return { id, total: this.flatten(copy).length };
+  }
+  /**
+   * 缓存里那份 setId 属于上一次的会话与进度：换个人来翻会撞 page_unavailable，
+   * 原来那份也可能已经被回收或挤掉了。所以命中缓存时不递 setId——
+   * 给一个翻不动的句柄，比不给更误导。
+   */
+  private stripPaging<T>(data: T): T {
+    const shaped = data as { setId?: string; shown?: number; available?: number; hasMore?: boolean; notes?: string[] };
+    if (!shaped || !shaped.setId) return data;
+    const { setId: _dropId, shown: _dropShown, available: _dropAvailable, hasMore: _dropMore, ...rest } = shaped;
+    return { ...rest, notes: [...(shaped.notes ?? []),
+      '这份来自缓存，没有翻页句柄；要多给几条就重新搜索，或者把上一次的 setId 传进 more。'] } as T;
   }
   /** 记下这一轮已经给出去了哪些，返回结果集里还有没有剩下的。 */
   private markServed(id: string, items: SearchItem[]): boolean {
@@ -440,7 +452,7 @@ export class SurfRuntime implements SurfService {
         return this.searchAggregated(input.query.trim(), limit, vertical, signal, config, config.searchMode === 'hybrid', _session);
       const cacheKey = this.cacheKey('search', [input.query.trim(), limit, providers, vertical]);
       const cached = this.cacheGet<SearchData>(cacheKey);
-      if (cached) return { ...cached.data, cached: true, cachedAgoMs: cached.agoMs };
+      if (cached) return { ...this.stripPaging(cached.data), cached: true, cachedAgoMs: cached.agoMs };
       const notes: string[] = [];
       const wantsVertical = vertical.tag !== undefined || vertical.zone !== undefined || vertical.language !== undefined;
       if (wantsVertical) {
@@ -526,7 +538,7 @@ export class SurfRuntime implements SurfService {
     const mode = hybrid ? 'hybrid' as const : 'aggregate' as const;
     const cacheKey = this.cacheKey('search-agg', [query, limit, providers, vertical, mode, config.aggregateConcurrency]);
     const cached = this.cacheGet<SearchData>(cacheKey);
-    if (cached) return { ...cached.data, cached: true, cachedAgoMs: cached.agoMs };
+    if (cached) return { ...this.stripPaging(cached.data), cached: true, cachedAgoMs: cached.agoMs };
     const notes: string[] = [];
     // 翻页的池子取决于这一次向来源要多几条：一次请求里多要一些，条数不额外花钱，
     // 但回执里只展示 limit 条，剩下的留在结果集等人来翻。
@@ -725,7 +737,7 @@ export class SurfRuntime implements SurfService {
     sources: ScholarSource[], signal: AbortSignal, config: SurfConfig): Promise<ScholarData> {
     const cacheKey = this.cacheKey('scholar-agg', [query, limit, sources, yearMin ?? null, config.aggregateConcurrency]);
     const cached = this.cacheGet<ScholarData>(cacheKey);
-    if (cached) return { ...cached.data, cached: true, cachedAgoMs: cached.agoMs };
+    if (cached) return { ...this.stripPaging(cached.data), cached: true, cachedAgoMs: cached.agoMs };
     const started = performance.now();
     const notes: string[] = [];
     const forceAll = sources.every(name => this.coolingLeft(name) > 0);

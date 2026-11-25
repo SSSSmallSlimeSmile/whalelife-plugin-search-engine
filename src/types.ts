@@ -88,12 +88,12 @@ export interface SurfConfig {
   /** 事实页的自定义来源；同上。 */
   factsCustomSources: CustomSource[];
 }
-export type PublicConfig = Omit<SurfConfig, 'braveApiKey' | 'anysearchApiKey' | 'tavilyApiKey' | 'exaApiKey' | 'proxyUrl' | 'semanticScholarApiKey' | 'customSources' | 'scholarCustomSources' | 'factsCustomSources'> & {
+export type PublicConfig = Omit<SurfConfig, 'braveApiKey' | 'anysearchApiKey' | 'tavilyApiKey' | 'exaApiKey' | 'proxyUrl' | 'semanticScholarApiKey' | 'apiToken' | 'customSources' | 'scholarCustomSources' | 'factsCustomSources'> & {
   searchProvider: SearchProvider;
   customSources: PublicCustomSource[];
   scholarCustomSources: PublicCustomSource[];
   factsCustomSources: PublicCustomSource[];
-  hasBraveApiKey: boolean; hasAnySearchApiKey: boolean; hasTavilyApiKey: boolean; hasExaApiKey: boolean; hasProxy: boolean; hasSemanticScholarApiKey: boolean;
+  hasBraveApiKey: boolean; hasAnySearchApiKey: boolean; hasTavilyApiKey: boolean; hasExaApiKey: boolean; hasProxy: boolean; hasSemanticScholarApiKey: boolean; hasApiToken: boolean;
 };
 export interface FetchOptions {
   signal?: AbortSignal; timeoutMs: number; maxBytes: number;

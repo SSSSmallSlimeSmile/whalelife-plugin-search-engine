@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  * Additional terms under AGPLv3 Section 7: see LICENSE-ADDITIONAL.
  */
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { Context, PluginHandler, ToolSession, TransientToolOutput } from 'whalelife';
 import { defaults, parseConfig, publicConfig, updateConfig, object } from './config.ts';
 import { SurfError, safeError } from './errors.ts';
@@ -170,6 +170,8 @@ export async function applyWithDependencies(ctx: Context, dependencies: Dependen
   }
 
   let revisionToken = randomUUID();
+  const tokenDigest = (token: string) => createHash('sha256').update(token).digest();
+  let expectedTokenDigest = config.apiToken ? tokenDigest(config.apiToken) : undefined;
   const revision = () => revisionToken;
   const state = () => ({ config: publicConfig(config), revision: revision(), status: runtime.status(), pendingReload, registrationErrors });
   const wrap = (handler: PluginHandler): PluginHandler => async (req, res, context) => {
@@ -200,6 +202,7 @@ export async function applyWithDependencies(ctx: Context, dependencies: Dependen
       if (body.revision !== revision()) throw new SurfError('config_conflict');
       const next = updateConfig(body.config, config);
       await ctx.config.save('config.json', next); config = next; revisionToken = randomUUID(); pendingReload = true;
+      expectedTokenDigest = next.apiToken ? tokenDigest(next.apiToken) : undefined;
       runtime.setConfig(next); configValid = true; registrationErrors = syncSearchTools();
     });
     saving = change.catch(() => {}); await change;
@@ -249,22 +252,22 @@ export async function applyWithDependencies(ctx: Context, dependencies: Dependen
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.end(JSON.stringify(result));
   }));
-  /** 定长比较：先比长度，长度一致才逐字节比，免得从耗时上摸出令牌。 */
-  const sameToken = (given: string, expected: string) => {
-    const a = Buffer.from(given), b = Buffer.from(expected);
-    return a.length === b.length && timingSafeEqual(a, b);
-  };
   // 对外 HTTP 接口：给别的程序用，令牌在设置页里填，空着就是关着。
   // 不开放 read —— 那等于把任意 URL 的出口借给别人。
-  ctx.web.api('/plugins/search-engine/api', wrap(async (req, res) => {
+  ctx.web.api('/plugins/search-engine/api', wrap(async (req, res, { signal }) => {
     if (req.method !== 'POST') { res.statusCode = 405; res.end(); return; }
-    const expected = config.apiToken;
+    const expected = expectedTokenDigest;
     if (!expected) throw new SurfError('api_disabled');
-    const header = String(req.headers['x-search-token'] ?? '').trim() ||
-      String(req.headers.authorization ?? '').replace(/^Bearer\s+/i, '').trim();
-    if (!sameToken(header, expected)) throw new SurfError('api_unauthorized');
-    const body = object(await readJsonBody(req, AbortSignal.timeout(60_000), { maxBytes: 8_192 }));
-    const sessionId = 'api-client';
+    const bearer = /^Bearer[ \t]+(\S+)$/i.exec(req.headers.authorization?.trim() ?? '')?.[1];
+    const header = String(req.headers['x-search-token'] ?? '').trim() || bearer || '';
+    if (!timingSafeEqual(tokenDigest(header), expected)) throw new SurfError('api_unauthorized');
+    if (req.headers['content-type']?.split(';', 1)[0].trim().toLowerCase() !== 'application/json')
+      throw new SurfError('invalid_input');
+    const body = object(await readJsonBody(req, AbortSignal.any([signal, ctx.signal]), { maxBytes: 8_192 }));
+    // 每个调用方一个会话：翻页结果集按会话隔离，两个程序同时调不会互相踩。
+    const client = typeof body.client === 'string' ? body.client.trim() : '';
+    if (client && !/^[A-Za-z0-9_-]{1,32}$/.test(client)) throw new SurfError('invalid_input');
+    const sessionId = 'api:' + (client || 'default');
     let result: unknown;
     if (body.tool === 'status') result = runtime.status();
     else if (body.tool === 'search') result = await runtime.search({ query: body.query, limit: body.limit,
