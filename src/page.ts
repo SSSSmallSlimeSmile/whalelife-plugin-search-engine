@@ -147,31 +147,7 @@ export const settingsPage = `<!doctype html>
     <div id="customCards" style="display:contents"></div>
   </div>
 </div>
-<div class="pg-item" id="customForm" hidden>
-<div class="cf-head"><span class="pg-label" id="customTitle">新自定义来源</span><span class="pg-hint" style="margin:0">只收 JSON 接口</span></div>
-<div class="pg-pair">
-<label class="pg-row"><span class="pg-label">名字</span><input type="text" id="cName" placeholder="mysearch：小写字母数字，1–24 位" autocomplete="off"></label>
-<label class="pg-row"><span class="pg-label">请求地址</span><input type="text" id="cUrl" placeholder="https://api.example.com/search?q={query}" autocomplete="off"></label>
-</div>
-<div class="pg-pair">
-<label class="pg-row"><span class="pg-label">方法</span><select id="cMethod"><option value="GET">GET</option><option value="POST">POST</option></select></label>
-<label class="pg-row"><span class="pg-label">Key（可选）</span><input type="password" id="cKey" placeholder="放在 Authorization: Bearer；留空就不带" autocomplete="new-password"></label>
-</div>
-<div class="pg-pair">
-<label class="pg-row"><span class="pg-label">结果数组</span><input type="text" id="cItems" placeholder="data.results；根就是数组填 $"></label>
-<label class="pg-row"><span class="pg-label">标题字段</span><input type="text" id="cTitle" placeholder="title"></label>
-</div>
-<div class="pg-pair">
-<label class="pg-row"><span class="pg-label">链接字段</span><input type="text" id="cLink" placeholder="url"></label>
-<label class="pg-row"><span class="pg-label">摘要字段（可空）</span><input type="text" id="cSnippet" placeholder="content"></label>
-</div>
-<div class="pg-pair" id="cScholarOnly" hidden>
-<label class="pg-row"><span class="pg-label">作者字段（可空）</span><input type="text" id="cAuthors" placeholder="authors；认数组或 name/display_name"></label>
-<label class="pg-row"><span class="pg-label">年份字段（可空）</span><input type="text" id="cYear" placeholder="year"></label>
-</div>
-<div class="chain-add"><button class="btn" type="button" id="cProbe">探一下</button><button class="btn primary" type="button" id="cSave">加到列表</button><button class="btn" type="button" id="cDelete" hidden>删掉这个来源</button><button class="btn" type="button" id="cCancel">取消</button><span class="chain-msg" id="cMsg"></span></div>
-<p class="pg-hint">只收 http/https、不跟随跳转——查询串不会被重发到另一个域。字段只认点路径（a.b.c），不支持数组下标。地址里没有 {query} 会被拒。POST 会发 {query, limit} 的 JSON 体。Key 存盘后不回传页面，同名留空表示沿用原值。</p>
-</div>
+
 <input type="hidden" name="searchProviders" id="searchProviders">
 <div id="hiddenFields" hidden>
 <div class="pg-item"><label class="pg-row"><span class="pg-label">借道代理</span><input type="password" name="proxyUrl" id="proxyUrl" autocomplete="new-password"></label>
@@ -273,7 +249,6 @@ export const settingsPage = `<!doctype html>
 </div>
 </section>
 
-
 <section class="pg-group" id="pg-facts" hidden>
 <p class="pg-desc">事实查询是另一个工具 search_facts，默认不注册：关着时它不在工具表里，不占每轮上下文。它查的是「条目」——这个东西叫什么、编号是多少，不是网页全文检索，所以不并进上面的来源链。</p>
 <div class="pg-pair">
@@ -303,6 +278,31 @@ export const settingsPage = `<!doctype html>
 <p class="pg-hint">只直连选中的那个来源一次，不改配置。语言取上面那一栏当前的值。</p></div>
 </div>
 </section>
+<div class="pg-item" id="customForm" hidden>
+<div class="cf-head"><span class="pg-label" id="customTitle">新自定义来源</span><span class="pg-hint" style="margin:0">只收 JSON 接口</span></div>
+<div class="pg-pair">
+<label class="pg-row"><span class="pg-label">名字</span><input type="text" id="cName" placeholder="mysearch：小写字母数字，1–24 位" autocomplete="off"></label>
+<label class="pg-row"><span class="pg-label">请求地址</span><input type="text" id="cUrl" placeholder="https://api.example.com/search?q={query}" autocomplete="off"></label>
+</div>
+<div class="pg-pair">
+<label class="pg-row"><span class="pg-label">方法</span><select id="cMethod"><option value="GET">GET</option><option value="POST">POST</option></select></label>
+<label class="pg-row"><span class="pg-label">Key（可选）</span><input type="password" id="cKey" placeholder="放在 Authorization: Bearer；留空就不带" autocomplete="new-password"></label>
+</div>
+<div class="pg-pair">
+<label class="pg-row"><span class="pg-label">结果数组</span><input type="text" id="cItems" placeholder="data.results；根就是数组填 $"></label>
+<label class="pg-row"><span class="pg-label">标题字段</span><input type="text" id="cTitle" placeholder="title"></label>
+</div>
+<div class="pg-pair">
+<label class="pg-row"><span class="pg-label">链接字段</span><input type="text" id="cLink" placeholder="url"></label>
+<label class="pg-row"><span class="pg-label">摘要字段（可空）</span><input type="text" id="cSnippet" placeholder="content"></label>
+</div>
+<div class="pg-pair" id="cScholarOnly" hidden>
+<label class="pg-row"><span class="pg-label">作者字段（可空）</span><input type="text" id="cAuthors" placeholder="authors；认数组或 name/display_name"></label>
+<label class="pg-row"><span class="pg-label">年份字段（可空）</span><input type="text" id="cYear" placeholder="year"></label>
+</div>
+<div class="chain-add"><button class="btn" type="button" id="cProbe">探一下</button><button class="btn primary" type="button" id="cSave">加到列表</button><button class="btn" type="button" id="cDelete" hidden>删掉这个来源</button><button class="btn" type="button" id="cCancel">取消</button><span class="chain-msg" id="cMsg"></span></div>
+<p class="pg-hint">只收 http/https、不跟随跳转——查询串不会被重发到另一个域。字段只认点路径（a.b.c），不支持数组下标。地址里没有 {query} 会被拒。POST 会发 {query, limit} 的 JSON 体。Key 存盘后不回传页面，同名留空表示沿用原值。</p>
+</div>
 </form></div></section>
 <script>
 const byId = (id) => document.getElementById(id);
@@ -328,9 +328,22 @@ function hasKeyFor(name) {
 function restoreSourceOrder(selector, sources) {
   const boxes = new Map([...document.querySelectorAll(selector)].map(box => [box.value, box]));
   for (const [name, box] of boxes) box.checked = sources.includes(name);
-  for (const name of sources) {
-    const card = boxes.get(name)?.closest(".src-card");
-    if (card) card.parentElement.append(card);
+  const grids = new Set([...boxes.values()].map(box => box.closest(".src-grid")).filter(Boolean));
+  for (const grid of grids) {
+    // 全量稳定重排：按 sources 顺序排前面，没列进去的保持原相对顺序排后面。
+    // 只把命中的往末尾 append 会把没命中的顶到前面去，看着像顺序乱了。
+    const rank = (card) => {
+      const box = card.querySelector("input[type=checkbox]");
+      const at = box ? sources.indexOf(box.value) : -1;
+      return at < 0 ? Number.MAX_SAFE_INTEGER : at;
+    };
+    [...grid.querySelectorAll(".src-card")]
+      .map((card, idx) => ({ card, idx }))
+      .sort((a, b) => rank(a.card) - rank(b.card) || a.idx - b.idx)
+      .forEach(({ card }) => grid.append(card));
+    // 「+ 自定义来源」永远排在最后，别夹在中间
+    const addCard = grid.querySelector(".src-card.add");
+    if (addCard) grid.append(addCard);
   }
 }
 function syncSrcCards() {
