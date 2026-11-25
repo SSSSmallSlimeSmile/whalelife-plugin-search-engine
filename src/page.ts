@@ -271,6 +271,9 @@ export const settingsPage = `<!doctype html>
 <div class="pg-item"><label class="pg-row"><span class="pg-label">联系邮箱（可选）</span><input type="text" name="scholarMailto" id="scholarMailto" placeholder="you@example.com" autocomplete="off"></label>
 <p class="pg-hint">只发给 Crossref 和 OpenAlex，进它们的 polite pool（配额更宽）。不填也能用，只是配额低一点，不会因此拒绝。</p></div>
 </div>
+<div class="pg-item"><label class="pg-row"><span class="pg-label">Semantic Scholar API Key（可选）</span><input type="password" name="semanticScholarApiKey" id="semanticScholarApiKey" autocomplete="new-password"></label>
+<p class="pg-hint" id="s2KeyState"></p><label class="pg-check"><input id="clearSemanticScholarApiKey" type="checkbox"><span class="pg-label">清除这个 Key</span></label>
+<p class="pg-hint">不填就走匿名，匿名配额极低，实测几乎每次 429；填了放进 x-api-key 头。其余四家都不要 Key。</p></div>
 <div class="pg-pair">
 <div class="pg-item"><span class="pg-label">来源（勾选即启用，按这里列出的顺序回退）</span>
 <div class="src-grid">
@@ -278,16 +281,17 @@ export const settingsPage = `<!doctype html>
 <label class="src-card" draggable="true"><input type="checkbox" class="scholar-src" value="openalex"><b>OpenAlex</b><span>覆盖面最广，带被引数</span><em class="src-flag">未启用</em></label>
 <label class="src-card" draggable="true"><input type="checkbox" class="scholar-src" value="crossref"><b>Crossref</b><span>期刊注册库，DOI 最全</span><em class="src-flag">未启用</em></label>
 <label class="src-card" draggable="true"><input type="checkbox" class="scholar-src" value="semanticscholar"><b>Semantic Scholar</b><span>无 Key 时常报 429</span><em class="src-flag">未启用</em></label>
+<label class="src-card" draggable="true"><input type="checkbox" class="scholar-src" value="europepmc"><b>Europe PMC</b><span>生命科学文献库，含预印本</span><em class="src-flag">未启用</em></label>
 <div id="scholarCustomCards" style="display:contents"></div>
 <button type="button" class="src-card add" id="scholarCustomNew"><b>+ 自定义来源</b><span>返回 JSON 的接口，跟内置几家共用这条回退链</span><em>点一下填接口</em></button>
 </div>
-<p class="pg-hint">前一个连不上才换下一个；连上但零条算应答，会记进回退链再试下一个。四个都不需要 Key。想临时换顺序或只查某一个，用工具参数 sources。</p></div>
+<p class="pg-hint">前一个连不上才换下一个；连上但零条算应答，会记进回退链再试下一个。五家里只有 Semantic Scholar 可能要 Key，其余都不要。想临时换顺序或只查某一个，用工具参数 sources。</p></div>
 </div>
 <div class="pg-pair">
 <div class="pg-item"><span class="pg-label">试一下</span>
-<div class="pg-item"><select id="scholarSrcSel"><option value="arxiv">arXiv</option><option value="openalex">OpenAlex</option><option value="crossref">Crossref</option><option value="semanticscholar">Semantic Scholar</option></select>
+<div class="pg-item"><select id="scholarSrcSel"><option value="arxiv">arXiv</option><option value="openalex">OpenAlex</option><option value="crossref">Crossref</option><option value="semanticscholar">Semantic Scholar</option><option value="europepmc">Europe PMC</option></select>
 <input type="text" id="scholarQuery" placeholder="检索词，例如 transformer attention"></div>
-<button class="btn" type="button" id="scholarProbe">试一下</button> <span class="chain-msg" id="scholarMsg"></span> <button class="btn" type="button" id="scholarProbeAll">四家一起</button>
+<button class="btn" type="button" id="scholarProbe">试一下</button> <span class="chain-msg" id="scholarMsg"></span> <button class="btn" type="button" id="scholarProbeAll">五家一起</button>
 <p class="pg-hint">「试一下」只打选中那一家；「四家一起」按当前链上的来源并发打一轮，各自成段列出。两个都不改配置、不写回执。</p><div class="probe-out" id="scholarOut" hidden></div></div>
 </div>
 </section>
@@ -1078,8 +1082,8 @@ function show(data) {
   byId("timeoutSeconds").value = c.timeoutMs / 1000;
   byId("pageKiB").value = c.maxPageBytes / 1024;
   byId("imageKiB").value = c.maxImageBytes / 1024;
-  for (const id of ["braveApiKey", "anysearchApiKey", "tavilyApiKey", "exaApiKey", "proxyUrl"]) byId(id).value = "";
-  for (const id of ["clearBraveApiKey", "clearAnySearchApiKey", "clearTavilyApiKey", "clearExaApiKey", "clearProxy"]) byId(id).checked = false;
+  for (const id of ["braveApiKey", "anysearchApiKey", "tavilyApiKey", "exaApiKey", "proxyUrl", "semanticScholarApiKey"]) byId(id).value = "";
+  for (const id of ["clearBraveApiKey", "clearAnySearchApiKey", "clearTavilyApiKey", "clearExaApiKey", "clearProxy", "clearSemanticScholarApiKey"]) byId(id).checked = false;
   byId("keyState").textContent = c.hasBraveApiKey ? "已保存 Key，原值不回传页面。" : "未设置；brave 来源需要它。";
   byId("tavilyState").textContent = c.hasTavilyApiKey ? "已保存 Key，原值不回传页面。" : "未设置；tavily 来源需要它。";
   byId("exaState").textContent = c.hasExaApiKey ? "已保存 Key，原值不回传页面。" : "未设置；exa 来源需要它。";
@@ -1087,6 +1091,7 @@ function show(data) {
   byId("proxyState").textContent = c.hasProxy ? "已有代理，地址和凭据不回传页面。" : "当前直连。";
   byId("scholarEnabled").checked = Boolean(c.scholarEnabled);
   byId("scholarMailto").value = c.scholarMailto || "";
+  byId("s2KeyState").textContent = c.hasSemanticScholarApiKey ? "已保存 Key，原值不回传页面。" : "未设置；Semantic Scholar 走匿名，基本每次 429。";
   restoreSourceOrder(".scholar-src", c.scholarSources || []);
   byId("factsEnabled").checked = Boolean(c.factsEnabled);
   byId("factsLang").value = c.factsLang || "zh";
@@ -1310,8 +1315,8 @@ byId("f").onsubmit = async (event) => {
   config.timeoutMs = Number(byId("timeoutSeconds").value) * 1000;
   config.maxPageBytes = Number(byId("pageKiB").value) * 1024;
   config.maxImageBytes = Number(byId("imageKiB").value) * 1024;
-  for (const id of ["braveApiKey", "anysearchApiKey", "tavilyApiKey", "exaApiKey", "proxyUrl"]) config[id] = byId(id).value;
-  for (const id of ["clearBraveApiKey", "clearAnySearchApiKey", "clearTavilyApiKey", "clearExaApiKey", "clearProxy"]) config[id] = byId(id).checked;
+  for (const id of ["braveApiKey", "anysearchApiKey", "tavilyApiKey", "exaApiKey", "proxyUrl", "semanticScholarApiKey"]) config[id] = byId(id).value;
+  for (const id of ["clearBraveApiKey", "clearAnySearchApiKey", "clearTavilyApiKey", "clearExaApiKey", "clearProxy", "clearSemanticScholarApiKey"]) config[id] = byId(id).checked;
   const plainCustom = item => ({ name: item.name, url: item.url, method: item.method,
     items: item.items, title: item.title, link: item.link, snippet: item.snippet || "", key: item.key || "" });
   config.customSources = customs.map(plainCustom);

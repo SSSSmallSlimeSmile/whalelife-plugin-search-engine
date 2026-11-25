@@ -25,7 +25,7 @@ export interface CustomSource {
 }
 export type PublicCustomSource = Omit<CustomSource, 'key'> & { hasKey: boolean };
 export type SearchZone = 'cn' | 'intl';
-export type ScholarSource = 'arxiv' | 'crossref' | 'openalex' | 'semanticscholar' | `custom:${string}`;
+export type ScholarSource = 'arxiv' | 'crossref' | 'openalex' | 'semanticscholar' | 'europepmc' | `custom:${string}`;
 export interface SurfConfig {
   /**
    * fallback（默认）：一条有序链，前一家失败才换下一家，拿到结果就停。
@@ -73,6 +73,8 @@ export interface SurfConfig {
   scholarEnabled: boolean;
   scholarSources: ScholarSource[];
   scholarMailto: string;
+  /** Semantic Scholar 的 API Key；不填是匿名模式，配额极低、几乎每次 429。 */
+  semanticScholarApiKey: string;
   /** 事实查询（维基/维基数据/OpenLibrary/OEIS）：同样默认不注册工具。 */
   factsEnabled: boolean;
   factsSources: FactSource[];
@@ -84,12 +86,12 @@ export interface SurfConfig {
   /** 事实页的自定义来源；同上。 */
   factsCustomSources: CustomSource[];
 }
-export type PublicConfig = Omit<SurfConfig, 'braveApiKey' | 'anysearchApiKey' | 'tavilyApiKey' | 'exaApiKey' | 'proxyUrl' | 'customSources' | 'scholarCustomSources' | 'factsCustomSources'> & {
+export type PublicConfig = Omit<SurfConfig, 'braveApiKey' | 'anysearchApiKey' | 'tavilyApiKey' | 'exaApiKey' | 'proxyUrl' | 'semanticScholarApiKey' | 'customSources' | 'scholarCustomSources' | 'factsCustomSources'> & {
   searchProvider: SearchProvider;
   customSources: PublicCustomSource[];
   scholarCustomSources: PublicCustomSource[];
   factsCustomSources: PublicCustomSource[];
-  hasBraveApiKey: boolean; hasAnySearchApiKey: boolean; hasTavilyApiKey: boolean; hasExaApiKey: boolean; hasProxy: boolean;
+  hasBraveApiKey: boolean; hasAnySearchApiKey: boolean; hasTavilyApiKey: boolean; hasExaApiKey: boolean; hasProxy: boolean; hasSemanticScholarApiKey: boolean;
 };
 export interface FetchOptions {
   signal?: AbortSignal; timeoutMs: number; maxBytes: number;

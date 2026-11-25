@@ -13,7 +13,7 @@ export const defaults: SurfConfig = {
   aggregateConcurrency: 2, providerWeights: {}, providerTiers: {},
   maxPageBytes: 2 * 1024 * 1024, maxImageBytes: 8 * 1024 * 1024,
   maxTextChars: 60_000, resultsLimit: 5, structuredRead: true, resultsMaxChars: 8000, referenceTtlSeconds: 600, concurrency: 3, cacheSeconds: 300, sourceFailThreshold: 2, sourceCooldownSeconds: 60,
-  scholarEnabled: false, scholarSources: ['arxiv', 'openalex', 'crossref'], scholarMailto: '',
+  scholarEnabled: false, scholarSources: ['arxiv', 'openalex', 'crossref'], scholarMailto: '', semanticScholarApiKey: '',
   factsEnabled: false, factsSources: ['wikipedia', 'wikidata', 'openlibrary', 'oeis'], factsLang: 'zh',
   customSources: [], scholarCustomSources: [], factsCustomSources: [],
 };
@@ -31,6 +31,7 @@ const secrets = [
   ['anysearchApiKey', 'clearAnySearchApiKey', 512],
   ['tavilyApiKey', 'clearTavilyApiKey', 512],
   ['exaApiKey', 'clearExaApiKey', 512],
+  ['semanticScholarApiKey', 'clearSemanticScholarApiKey', 512],
   ['proxyUrl', 'clearProxy', 2048],
 ] as const;
 function isBuiltinProvider(value: unknown): value is Exclude<SearchProvider, `custom:${string}`> {
@@ -193,7 +194,7 @@ export function parseConfig(value: unknown): SurfConfig {
     }
     if (input.scholarSources !== undefined) {
       const list = input.scholarSources;
-      if (!Array.isArray(list) || list.length === 0 || list.length > 4 || !list.every(item => isScholarSource(item, scholarCustom)) ||
+      if (!Array.isArray(list) || list.length === 0 || list.length > 5 || !list.every(item => isScholarSource(item, scholarCustom)) ||
           new Set(list).size !== list.length) throw new SurfError('config_invalid');
       result.scholarSources = [...(list as ScholarSource[])];
     }
@@ -222,13 +223,14 @@ export function parseConfig(value: unknown): SurfConfig {
   } catch { throw new SurfError('config_invalid'); }
 }
 export function publicConfig(config: SurfConfig): PublicConfig {
-  const { braveApiKey, anysearchApiKey, tavilyApiKey, exaApiKey, proxyUrl, ...rest } = config;
+  const { braveApiKey, anysearchApiKey, tavilyApiKey, exaApiKey, proxyUrl, semanticScholarApiKey, ...rest } = config;
   return { ...rest, searchProviders: [...rest.searchProviders], searchProvider: rest.searchProviders[0],
     customSources: config.customSources.map(({ key, ...rest2 }) => ({ ...rest2, hasKey: Boolean(key) })),
     scholarCustomSources: config.scholarCustomSources.map(({ key, ...rest2 }) => ({ ...rest2, hasKey: Boolean(key) })),
     factsCustomSources: config.factsCustomSources.map(({ key, ...rest2 }) => ({ ...rest2, hasKey: Boolean(key) })),
     hasBraveApiKey: Boolean(braveApiKey), hasAnySearchApiKey: Boolean(anysearchApiKey),
-    hasTavilyApiKey: Boolean(tavilyApiKey), hasExaApiKey: Boolean(exaApiKey), hasProxy: Boolean(proxyUrl) };
+    hasTavilyApiKey: Boolean(tavilyApiKey), hasExaApiKey: Boolean(exaApiKey), hasProxy: Boolean(proxyUrl),
+    hasSemanticScholarApiKey: Boolean(semanticScholarApiKey) };
 }
 export function updateConfig(value: unknown, current: SurfConfig): SurfConfig {
   const input = { ...object(value) };

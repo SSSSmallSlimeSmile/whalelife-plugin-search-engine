@@ -13,7 +13,7 @@ export interface ScholarRequest {
   method?: 'GET' | 'POST'; body?: string; allowRedirects?: boolean;
 }
 
-export const scholarSources: ScholarSource[] = ['arxiv', 'crossref', 'openalex', 'semanticscholar'];
+export const scholarSources: ScholarSource[] = ['arxiv', 'crossref', 'openalex', 'semanticscholar', 'europepmc'];
 
 /** 自定义学术来源的名字统一挂 custom: 前缀，和内置四家共用一条回退链。 */
 export function isScholarSource(value: unknown, customs: CustomSource[] = []): value is ScholarSource {
@@ -23,10 +23,10 @@ export function isScholarSource(value: unknown, customs: CustomSource[] = []): v
 }
 
 /**
- * 四个来源全是公开 API，不要 Key。Crossref 和 OpenAlex 只有填了联系邮箱才进 polite pool，
- * 拿不到就照常请求，只是配额低一点——不因为缺邮箱就拒绝。
+ * arXiv / Crossref / OpenAlex / Europe PMC 都是公开 API，不要 Key；Crossref 和 OpenAlex 只有填了联系邮箱才进 polite pool，
+ * 拿不到就照常请求，只是配额低一点——不因为缺邮箱就拒绝。Semantic Scholar 匿名配额极低（基本 429），可选填 Key 放进 x-api-key 头。
  */
-export function buildRequest(source: ScholarSource, query: string, limit: number, mailto: string, customs: CustomSource[] = []): ScholarRequest {
+export function buildRequest(source: ScholarSource, query: string, limit: number, mailto: string, customs: CustomSource[] = [], semKey = ''): ScholarRequest {
   const q = query.trim();
   const rows = Math.min(20, Math.max(1, Math.trunc(limit)));
   if (source.startsWith('custom:')) {
@@ -42,6 +42,15 @@ export function buildRequest(source: ScholarSource, query: string, limit: number
     url.searchParams.set('start', '0');
     url.searchParams.set('max_results', String(rows));
     return { url: url.href, headers: { Accept: 'application/atom+xml' } };
+  }
+  if (source === 'europepmc') {
+    const url = new URL('https://www.ebi.ac.uk/europepmc/webservices/rest/search');
+    url.searchParams.set('query', q);
+    url.searchParams.set('format', 'json');
+    url.searchParams.set('pageSize', String(rows));
+    // resultType=core 才带摘要和期刊名；结果列表在 resultList.result。
+    url.searchParams.set('resultType', 'core');
+    return { url: url.href, headers: { Accept: 'application/json' } };
   }
   if (source === 'crossref') {
     const url = new URL('https://api.crossref.org/works');
@@ -64,7 +73,7 @@ export function buildRequest(source: ScholarSource, query: string, limit: number
   url.searchParams.set('query', q);
   url.searchParams.set('limit', String(rows));
   url.searchParams.set('fields', 'title,authors,year,venue,externalIds,url,citationCount,abstract');
-  return { url: url.href, headers: { Accept: 'application/json' } };
+  return { url: url.href, headers: semKey ? { Accept: 'application/json', 'x-api-key': semKey } : { Accept: 'application/json' } };
 }
 
 const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
@@ -84,7 +93,8 @@ function decodeEntities(text: string): string {
 /** 摘要里常带 JATS / HTML 标记；先剥标签再压空白，最后按字符上限截断。 */
 function cleanText(value: unknown, max: number): string {
   if (typeof value !== 'string') return '';
-  const text = decodeEntities(value.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  // 剥标签时标签会被换成空格，于是「markup .」这种标点前多一格；顺手收掉。
+  const text = decodeEntities(value.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').replace(/\s+([,.!?;:)\]])/g, '$1').trim();
   return text.length > max ? text.slice(0, max).trimEnd() + '…' : text;
 }
 
@@ -228,6 +238,37 @@ function parseOpenAlex(body: Buffer, limit: number): ScholarItem[] {
   return items;
 }
 
+/** Europe PMC：生命科学文献库（预印本 PPR、MED、PMC 都有）。authors 是 "Cim M, Topcu B." 一串，按逗号拆。 */
+function parseEuropePmc(body: Buffer, limit: number): ScholarItem[] {
+  const json = parseJson(body);
+  const list = (json as any)?.resultList?.result;
+  if (!Array.isArray(list)) throw new SurfError('search_parse');
+  const items: ScholarItem[] = [];
+  for (const row of list) {
+    const title = cleanText(row?.title, 300);
+    if (!title) continue;
+    const doi = typeof row?.doi === 'string' ? row.doi : '';
+    const id = typeof row?.id === 'string' ? row.id : '';
+    const kind = typeof row?.source === 'string' ? row.source : '';
+    const url = doi ? 'https://doi.org/' + doi : id && kind ? 'https://europepmc.org/article/' + kind + '/' + id : '';
+    const list2 = typeof row?.authorString === 'string' ? row.authorString.split(/,\s*/) : [];
+    const authors = uniqueAuthors(list2, item => String(item).replace(/\.$/, ''));
+    items.push({
+      source: 'europepmc',
+      title,
+      authors,
+      year: yearOf(row?.pubYear),
+      venue: cleanText(row?.journalTitle ?? (row as any)?.bookOrReportDetails?.publisher ?? '', 120),
+      ...(doi ? { doi } : {}),
+      ...(url ? { url } : {}),
+      ...(positiveInt(row?.citedByCount) !== undefined ? { citations: positiveInt(row?.citedByCount) } : {}),
+      abstract: cleanText(row?.abstractText, 500),
+    });
+    if (items.length >= limit) break;
+  }
+  return items;
+}
+
 function parseSemanticScholar(body: Buffer, limit: number): ScholarItem[] {
   const json = parseJson(body);
   const list = (json as any)?.data;
@@ -268,5 +309,6 @@ export function parseScholar(source: ScholarSource, body: Buffer, limit: number,
   if (source === 'arxiv') return parseArxiv(body, limit);
   if (source === 'crossref') return parseCrossref(body, limit);
   if (source === 'openalex') return parseOpenAlex(body, limit);
+  if (source === 'europepmc') return parseEuropePmc(body, limit);
   return parseSemanticScholar(body, limit);
 }

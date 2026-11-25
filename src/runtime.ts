@@ -600,7 +600,7 @@ export class SurfRuntime implements SurfService {
       const limitSignal = AbortSignal.timeout(Math.max(1, budgetMs));
       const attemptSignal = AbortSignal.any([signal, limitSignal]);
       try {
-        const request = buildRequest(source, query, limit, config.scholarMailto, config.scholarCustomSources);
+        const request = buildRequest(source, query, limit, config.scholarMailto, config.scholarCustomSources, config.semanticScholarApiKey);
         const items = await untilCancelled(attemptSignal, async () => {
           const response = await this.fetcher.get(request.url, { signal: attemptSignal, timeoutMs: budgetMs,
             maxBytes: config.maxPageBytes, proxyUrl: config.proxyUrl,
@@ -761,7 +761,7 @@ export class SurfRuntime implements SurfService {
           const timeoutMs = this.sourceBudget(config, source, index, sources.length, remaining);
           limitSignal = AbortSignal.timeout(timeoutMs);
           const attemptSignal = AbortSignal.any([signal, limitSignal]);
-          const request = buildRequest(source, query, limit, config.scholarMailto, config.scholarCustomSources);
+          const request = buildRequest(source, query, limit, config.scholarMailto, config.scholarCustomSources, config.semanticScholarApiKey);
           const items: ScholarItem[] = await untilCancelled(attemptSignal, async () => {
             const response = await this.fetcher.get(request.url, { signal: attemptSignal, timeoutMs,
               maxBytes: config.maxPageBytes, proxyUrl: config.proxyUrl,
@@ -939,7 +939,7 @@ export class SurfRuntime implements SurfService {
       const budget = Math.min(this.config.timeoutMs, 15_000);
       const signal = AbortSignal.any([this.signal, AbortSignal.timeout(budget)]);
       const query = typeof input.query === 'string' && input.query.trim() ? input.query.trim().slice(0, 200) : 'transformer';
-      const request = buildRequest(source, query, 3, this.config.scholarMailto, this.config.scholarCustomSources);
+      const request = buildRequest(source, query, 3, this.config.scholarMailto, this.config.scholarCustomSources, this.config.semanticScholarApiKey);
       const items = await untilCancelled(signal, async () => {
         const response = await this.fetcher.get(request.url, { signal, timeoutMs: budget,
           maxBytes: this.config.maxPageBytes, proxyUrl: this.config.proxyUrl,

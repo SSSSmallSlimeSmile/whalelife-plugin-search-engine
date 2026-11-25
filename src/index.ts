@@ -91,7 +91,7 @@ export async function applyWithDependencies(ctx: Context, dependencies: Dependen
         schema: { type: 'object', properties: {
           query: { type: 'string', description: '检索词，可以是标题、作者加关键词，或者一句研究问题。' },
           limit: { type: 'integer', minimum: 1, maximum: 10 },
-          sources: { type: 'array', items: { type: 'string', enum: ['arxiv', 'crossref', 'openalex', 'semanticscholar'] },
+          sources: { type: 'array', items: { type: 'string', enum: ['arxiv', 'crossref', 'openalex', 'semanticscholar', 'europepmc'] },
             description: '只查这几个来源，按给定顺序；不传就用设置里的顺序。' },
           yearMin: { type: 'integer', minimum: 1900, maximum: 2100, description: '只要这一年及之后的文献。' },
         }, required: ['query'], additionalProperties: false },

@@ -219,22 +219,19 @@ AnySearch 的 tag 不是自由词。实测裸词（`academic`、`news`、`securi
 
 这样做是为了让不用它的人不付每轮的 schema。勾上之后每轮多一份工具定义，这是真的开销。
 
-四个来源都是公开接口，不要 Key：
+五家来源，只有 Semantic Scholar 可能要 Key：
 
 | 来源 | 接口 | 特点 |
 |---|---|---|
 | arXiv | `export.arxiv.org/api/query` | 预印本，全文免费，只有 Atom XML |
 | OpenAlex | `api.openalex.org/works` | 覆盖面最广，带被引数；摘要存倒排索引，要按位置拼回去 |
 | Crossref | `api.crossref.org/works` | 期刊注册库，DOI 最全；**不加类型过滤时图注会占满前排** |
-| Semantic Scholar | `api.semanticscholar.org/graph/v1` | 无 Key 时常 429，回退链会继续下一个 |
+| Semantic Scholar | `api.semanticscholar.org/graph/v1` | 匿名额极低，几乎每次 429；填空可选，放进 `x-api-key` 头 |
+| Europe PMC | `ebi.ac.uk/europepmc/webservices/rest/search` | 生命科学文献库，含预印本（PPR）与 MEDLINE；`resultType=core` 才带摘要 |
 
-回退规则和网页搜索一样：前一个连不上才换下一个，第一个拿剩余预算的七成；连上但零条算应答，记进回退链再试。全部失败才报 `search_exhausted`。
+实测（2026-11-25）：arXiv 87–928 ms 3 条；OpenAlex 921–1430 ms 3 条；Crossref 959–3555 ms 3 条；Semantic Scholar 匿名 429；Europe PMC 约 9.3 秒 3 条（慢，可给 `sourceTimeouts` 单独掐）。
 
-返回的是结构化条目，不是网页摘要：标题、作者（最多 6 个）、年份、期刊、DOI 链接、被引数、摘要前 500 字。`yearMin` 可只要某年之后的文献，被过滤掉的条数写进 `notes`。
-
-Crossref 和 OpenAlex 支持 `mailto`（设置页「联系邮箱」），填了才进 polite pool；不填照常请求，只是配额低一点，不会因此拒绝。
-
-实测（2026-11-25）：arXiv 87–928 ms 3 条；OpenAlex 921–1430 ms 3 条；Crossref 959–3555 ms 3 条；Semantic Scholar 连续 429。
+**Semantic Scholar 的 Key 是无效时看得出来的**：服务端回 403，回执写「来源要求验证、登录或限制访问」，不是静默降级成匿名。格式对但被拒，通常要去它控制台看 key 是否已激活。
 ## 多源回退的来源
 
 顺序回退、时间预算分配、空结果分层这三条，移植自 [Lain-in-coding/dsh-grok-search](https://github.com/Lain-in-coding/dsh-grok-search)（MIT）。那是 DeepSeek Harness 的插件，用来绕开它家官方付费搜索；本插件只取调度思路，运行时代码按自己的结构重写，不含它的 Rust 内核，也不引入它那五家 Key 依赖。
