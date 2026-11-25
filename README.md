@@ -64,7 +64,7 @@ API Key 与带凭据代理仅在本插件后端配置中保存，设置页只显
 
 **fallback**：来源链一条有序的链，前一家失败才换下一家，拿到第一条非空结果就停。一次只付一份开销，结果只来自一家，顺序不用想。
 
-**aggregate（默认）**：链上所有来源同时发请求，各自成段原样列出。
+**aggregate（默认）**：链上来源分批并发出请求，各自成段原样列出。
 
 - 回执里 `mode: "aggregate"`，条目在 `groups[]` 里，每段带 `provider` / `sourceKind` / `elapsedMs` / `results`
 - **顶层 `results` 为空**。同一批内容如果既在 `groups` 又在 `results` 里出现，等于花两倍 token 读一遍
@@ -72,7 +72,8 @@ API Key 与带凭据代理仅在本插件后端配置中保存，设置页只显
 - 只标重复：同一条链接（去掉 `#` 锚点后相同）被后面的来源再次给出时，那条带 `dupOf: "先给出的那家"`，顶层给 `overlap`，数值是被两家以上覆盖的 URL 数。`overlap` 高说明聚合在花钱买同一份东西
 - 一家的失败不拖累别家，`error: { code, reason }` 留在它自己那段上；全都没结果才报 `search_exhausted`
 - 冷却中的来源直接写 `skipped`，不发请求
-- 总量预算按 `groups` 顺序分配（先到先得），每段被丢的条数记在那段的 `truncated` 上
+- 总量预算按各家的权重切成份额（见「两级来源与权重」），每段带 `weight` / `budgetChars`，被丢的条数记在那段的 `truncated` 上
+- 并发数由 `aggregateConcurrency` 定（默认 2）；去重后条目不够 `resultsLimit` 才补下一家，回执 `notes` 会写明这次没打哪几家
 
 实测（同一查询，链 `anysearch → duckduckgo → bing`，limit 5）：
 
@@ -134,7 +135,30 @@ duckduckgo  sourceKind=html  via=html   domain=handbook.modular.com / learn.micr
 
 只作用于 `search_web`。学术和事实的条目本来就有 `source` 字段说明来自哪一家。
 
-## 二级来源
+## 两级来源与权重
+
+来源链分两级：
+
+- **一级**：权重高。一级里排在链首的那家，页面渲染成实线主卡，下面可以挂一个回退来源
+- **二级**：便宜兜底，权重低，**自己不挂回退**——二级再挂二级就绕成一条链了
+
+拖动卡片跨区就换级；保存时只把二级那几家写进 `providerTiers`，没写的算一级。
+
+**权重只决定分多少字，不决定谁排前面。** 结果不排序，谁更相关我们判不了；按权重排出来的顺序只是看着像评测。`providerWeights` 取值 1–5，没配过时一级缺省 3、二级缺省 1。`resultsMaxChars` 按权重切成份额：链上三家权重 5/3/1、总预算 8000，就是 4444 / 2666 / 888。
+
+**并发数** `aggregateConcurrency` 取值 1–5，默认 2。先并发打链上前几家，跨来源去重后的条目还不够 `resultsLimit` 时再补下一家，够就停。
+
+实测（链 `anysearch → duckduckgo → exa`，权重 5/3/1，并发 3，总预算 8000，limit 3）：
+
+```
+anysearch   weight=5  budgetChars=4444   3 条
+duckduckgo  weight=3  budgetChars=2666   3 条
+exa         weight=1  budgetChars=888    1 条  truncated=2
+```
+
+exa 那段只装得下一条——份额小了就是这个效果，不是它没搜到。
+
+## 回退来源（standby）
 
 每家来源可以配一个自己的二级：它没拿到结果时改用那一家。键是来源名，值是另一家：
 

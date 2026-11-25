@@ -63,6 +63,12 @@ export interface SurfConfig {
   resultsMaxChars: number;
   referenceTtlSeconds: number;
   concurrency: number;
+  /** 聚合模式下一批并发打几家（1–5）。链上还有来源时，去重后条目不够 limit 再补下一家。 */
+  aggregateConcurrency: number;
+  /** 每个来源的权重 1–5，只决定分多少字，不决定排序。没配过：一级 3、二级 1。 */
+  providerWeights: Record<string, number>;
+  /** 每个来源的级别：1 = 一级（可设回退、权重高），2 = 二级（免费兜底、不设回退）。没配过算 1。 */
+  providerTiers: Record<string, 1 | 2>;
   /** 学术搜索：默认不注册工具，开关打开后才有 search_scholar。 */
   scholarEnabled: boolean;
   scholarSources: ScholarSource[];
@@ -174,6 +180,9 @@ export interface AggregateGroup {
   results: SearchItem[];
   /** 这一段里因总量上限被丢掉的条目数。 */
   truncated?: number;
+  /** 这一段分到的权重与字符份额（预算按权重切）。 */
+  weight?: number;
+  budgetChars?: number;
   /** 这家失败了：code 与原因都在这里，不抛到整次调用外。 */
   error?: { code: string; reason: string };
   /** 冷却中被跳过，没发请求。 */

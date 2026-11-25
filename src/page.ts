@@ -32,6 +32,11 @@ export const settingsPage = `<!doctype html>
 #msg.err{color:#b91c1c}
 .chain{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:minmax(0,1fr);gap:8px}
 .chain-row.primary{border-width:2px}
+.chain-zone{border:1px dashed #dcdfe6;border-radius:10px;padding:8px 10px;margin-top:8px}
+.chain-zone.over{border-color:#7c5cff;background:rgba(124,92,255,.04)}
+.chain-zone>.tier-tag{display:block;font-size:12px;color:#7a8090;margin-bottom:4px}
+.chain-zone>.tier-note{display:block;font-size:12px;color:#9aa0b0;margin-top:4px;font-style:normal}
+.chain-row .chain-weight{font-size:12px;padding:2px 4px;max-width:92px}
 .chain-standby{display:flex;align-items:center;gap:8px;margin:-2px 0 0 16px;padding:6px 10px;border:1px dashed rgba(124,92,255,.45);border-radius:9px;background:rgba(124,92,255,.03);font-size:12px;color:#797e8c}
 .chain-standby select{font-size:12px;padding:2px 6px;max-width:200px}
 .chain-standby em{font-style:normal;color:#9aa0b0}
@@ -127,10 +132,21 @@ export const settingsPage = `<!doctype html>
 <div class="panel-body"><form id="f">
 
 <section class="pg-group" id="pg-source">
-<p class="pg-desc">搜索来源是一条链，两种用法：聚合（默认）是链上几家同时打、各自成段列出、只标重复；顺序回退是按链一家家试、前一家失败才换下一家。回退时第一个来源拿剩余预算的七成，其余按数量均分。</p>
+<p class="pg-desc">搜索来源是一条链，两种用法：聚合（默认）是链上几家同时打、各自成段列出、只标重复；顺序回退是按链一家家试、前一家失败才换下一家。分两级——一级权重高、首位可以挂一个回退来源；二级便宜、只作兜底，自己不挂回退。权重只决定这一家分到多少字，不决定谁排前面：结果不排序，谁更相关我们判不了。</p>
 <div class="pg-pair">
 <div class="pg-item"><span class="pg-label">搜索来源（有序，可拖动排序）</span>
+<div id="tierBox">
+<div class="chain-zone" data-tier="1">
+<span class="tier-tag">一级 · 权重高，首位可以挂一个回退</span>
 <ul id="chain" class="chain"></ul>
+<em class="tier-note" id="tierNote1"></em>
+</div>
+<div class="chain-zone" data-tier="2">
+<span class="tier-tag">二级 · 便宜兜底，权重低，不设回退</span>
+<ul id="chain2" class="chain"></ul>
+<em class="tier-note" id="tierNote2"></em>
+</div>
+</div>
 <div id="chainMsg" class="chain-msg" style="margin-top:10px;min-height:1em"></div>
 <div class="pg-tools"><button type="button" class="btn" id="proxyOpen">代理设置</button><span class="pg-hint" style="margin:0" id="proxyState"></span></div>
 <div class="presets" id="presets">
@@ -172,6 +188,10 @@ export const settingsPage = `<!doctype html>
 <div class="pg-pair">
 <div class="pg-item"><label class="pg-row"><span class="pg-label">搜索方式</span><select name="searchMode" id="searchMode"><option value="hybrid">首位为主 + 其余并发（首位没拿到结果时主位按链顺序顺延，不额外发请求）</option><option value="aggregate">聚合并发（默认；全，几家同时打、分段列出，不分主次）</option><option value="fallback">顺序回退（省，一次只打一家，拿到就停）</option></select></label>
 <p class="pg-hint">回退：按来源链一家家试，前一家失败才换下一家，拿到结果就停——一次只付一份开销。聚合：链上所有来源同时发请求，各自成段原样列出，不排序、不合并，只标出重复（同一条链接被几家给出的，后来的带 dupOf，顶层给 overlap）。聚合的结果在回执的 groups 里，顶层 results 为空。开销是几倍，换来的是"一家漏了另一家能补上"。</p></div>
+</div>
+<div class="pg-pair">
+<div class="pg-item"><label class="pg-row"><span class="pg-label">聚合一次并发几家</span><input type="number" name="aggregateConcurrency" id="aggregateConcurrency" min="1" max="5" required></label>
+<p class="pg-hint">1–5，默认 2。先并发打链上前几家，去重后的条目还不够「默认结果数」时再补下一家，够就停。链序就是主次：一级在前、二级在后。</p></div>
 </div>
 <div class="pg-pair">
 <div class="pg-item"><label class="pg-row"><span class="pg-label">结果总量上限（字符）</span><input type="number" name="resultsMaxChars" id="resultsMaxChars" min="0" max="40000" required></label>
@@ -433,70 +453,131 @@ function standbyRow(name) {
   li.append(text, sel, hint);
   return li;
 }
+let tiers = {};
+let weights = {};
+function tierOf(name) { return tiers[name] === 2 ? 2 : 1; }
+function weightOf(name) {
+  const value = Number(weights[name]);
+  return value >= 1 && value <= 5 ? value : (tierOf(name) === 2 ? 1 : 3);
+}
+function groupsOf(tier) { return chain.filter(name => tierOf(name) === tier); }
+/** 一级总排在二级前面；组内保持原来相对顺序。 */
+function normalizeChain() {
+  chain = [...chain.filter(name => tierOf(name) === 1), ...chain.filter(name => tierOf(name) === 2)];
+}
+function setTier(name, tier) { if (tier === 2) tiers[name] = 2; else delete tiers[name]; }
+function renderRow(name, index) {
+  const tier = tierOf(name);
+  const list = groupsOf(tier);
+  const row = document.createElement("li");
+  row.className = "chain-row" + (tier === 1 && list[0] === name ? " primary" : "");
+  row.draggable = true;
+  row.dataset.name = name;
+  row.dataset.tier = String(tier);
+  const grip = document.createElement("span"); grip.className = "grip"; grip.textContent = "\u2261";
+  const label = document.createElement("b"); label.textContent = name;
+  const order = document.createElement("em"); order.textContent = "#" + (index + 1);
+  const weight = document.createElement("select");
+  weight.className = "chain-weight";
+  weight.title = "权重：只决定这一家分多少字，不决定排序";
+  for (const value of [1, 2, 3, 4, 5]) {
+    const option = document.createElement("option");
+    option.value = String(value); option.textContent = "权重 " + value;
+    weight.append(option);
+  }
+  weight.value = String(weightOf(name));
+  weight.addEventListener("change", () => { weights[name] = Number(weight.value); });
+  const btns = document.createElement("span"); btns.className = "chain-btns";
+  const mk = (text, act, disabled) => { const b = document.createElement("button"); b.type = "button"; b.textContent = text; b.dataset.act = act; b.dataset.name = name; b.disabled = Boolean(disabled); return b; };
+  const at = list.indexOf(name);
+  btns.append(mk("\u2191", "up", at === 0), mk("\u2193", "down", at === list.length - 1),
+    mk("\u5220\u9664", "del", chain.length <= 1), mk("\u8bd5\u4e00\u4e0b", "probe", false));
+  const msg = document.createElement("span"); msg.className = "chain-msg"; btns.append(msg);
+  row.append(grip, label, order, weight, btns);
+  return row;
+}
 function renderChain() {
-  const list = byId("chain");
-  list.textContent = "";
+  normalizeChain();
+  const one = byId("chain"), two = byId("chain2");
+  one.textContent = ""; two.textContent = "";
+  const first = groupsOf(1)[0];
   chain.forEach((name, index) => {
-    const row = document.createElement("li");
-    row.className = index === 0 ? "chain-row primary" : "chain-row";
-    row.draggable = true;
-    row.dataset.index = String(index);
-    const grip = document.createElement("span"); grip.className = "grip"; grip.textContent = "\u2261";
-    const label = document.createElement("b"); label.textContent = name;
-    const order = document.createElement("em"); order.textContent = "#" + (index + 1);
-    const btns = document.createElement("span"); btns.className = "chain-btns";
-    const mk = (text, act, disabled) => { const b = document.createElement("button"); b.type = "button"; b.textContent = text; b.dataset.act = act; b.dataset.index = String(index); b.disabled = Boolean(disabled); return b; };
-    btns.append(mk("\u2191", "up", index === 0), mk("\u2193", "down", index === chain.length - 1), mk("\u5220\u9664", "del", chain.length <= 1), mk("\u8bd5\u4e00\u4e0b", "probe", false));
-    const msg = document.createElement("span"); msg.className = "chain-msg";
-    btns.append(msg);
-    row.append(grip, label, order, btns);
-    list.append(row);
-    if (index === 0) list.append(standbyRow(name));
+    (tierOf(name) === 2 ? two : one).append(renderRow(name, index));
+    if (name === first) one.append(standbyRow(name));
   });
+  byId("tierNote1").textContent = groupsOf(1).length ? "" : "一级还空着，从下面拖一张进来";
+  byId("tierNote2").textContent = groupsOf(2).length ? "" : "空着也行：二级只在你想要便宜兜底时才用";
   byId("searchProviders").value = chain.join(", ");
   renderCustoms();
   renderPresets();
 }
-function moveChain(from, to) {
-  if (to < 0 || to >= chain.length || from === to) return;
-  const item = chain.splice(from, 1)[0];
-  chain.splice(to, 0, item);
+function moveWithin(name, delta) {
+  const list = groupsOf(tierOf(name));
+  const at = list.indexOf(name), to = at + delta;
+  if (to < 0 || to >= list.length) return;
+  const left = chain.indexOf(list[at]), right = chain.indexOf(list[to]);
+  [chain[left], chain[right]] = [chain[right], chain[left]];
   renderChain();
 }
-byId("chain").addEventListener("click", (event) => {
+function moveTo(name, target, after) {
+  if (name === target) return;
+  setTier(name, tierOf(target));
+  chain.splice(chain.indexOf(name), 1);
+  const at = chain.indexOf(target);
+  chain.splice(after ? at + 1 : at, 0, name);
+  renderChain();
+}
+function appendTo(tier, name) {
+  chain.splice(chain.indexOf(name), 1);
+  chain.push(name);
+  setTier(name, tier);
+  renderChain();
+}
+const TIER_BOX = byId("tierBox");
+TIER_BOX.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-act]");
   if (!button) return;
-  const index = Number(button.dataset.index);
+  const name = button.dataset.name;
   const act = button.dataset.act;
-  if (act === "up") moveChain(index, index - 1);
-  else if (act === "down") moveChain(index, index + 1);
-  else if (act === "del") { chain.splice(index, 1); renderChain(); }
-  else if (act === "probe") probe({ provider: chain[index] }, button.parentNode.querySelector(".chain-msg"));
+  if (act === "up") moveWithin(name, -1);
+  else if (act === "down") moveWithin(name, 1);
+  else if (act === "del") {
+    chain = chain.filter(item => item !== name);
+    delete tiers[name]; delete weights[name]; delete fallbacks[name];
+    renderChain();
+  } else if (act === "probe") probe({ provider: name }, button.parentNode.querySelector(".chain-msg"));
 });
-byId("chain").addEventListener("dragstart", (event) => {
+TIER_BOX.addEventListener("dragstart", (event) => {
   const row = event.target.closest(".chain-row");
   if (!row) return;
-  event.dataTransfer.setData("text/plain", row.dataset.index);
+  event.dataTransfer.setData("text/plain", row.dataset.name);
   event.dataTransfer.effectAllowed = "move";
   row.classList.add("drag");
 });
-byId("chain").addEventListener("dragend", () => {
-  for (const item of byId("chain").querySelectorAll(".over, .drag")) item.classList.remove("over", "drag");
+TIER_BOX.addEventListener("dragend", () => {
+  for (const item of TIER_BOX.querySelectorAll(".over, .drag")) item.classList.remove("over", "drag");
 });
-byId("chain").addEventListener("dragover", (event) => {
-  const row = event.target.closest(".chain-row");
-  if (!row) return;
+TIER_BOX.addEventListener("dragover", (event) => {
+  const zone = event.target.closest(".chain-zone");
+  if (!zone) return;
   event.preventDefault();
-  for (const item of byId("chain").querySelectorAll(".over")) if (item !== row) item.classList.remove("over");
-  row.classList.add("over");
-});
-byId("chain").addEventListener("drop", (event) => {
   const row = event.target.closest(".chain-row");
-  if (!row) return;
-  event.preventDefault();
-  row.classList.remove("over");
-  moveChain(Number(event.dataTransfer.getData("text/plain")), Number(row.dataset.index));
+  for (const item of TIER_BOX.querySelectorAll(".over")) if (item !== row) item.classList.remove("over");
+  (row || zone).classList.add("over");
 });
+TIER_BOX.addEventListener("drop", (event) => {
+  const zone = event.target.closest(".chain-zone");
+  if (!zone) return;
+  event.preventDefault();
+  const name = event.dataTransfer.getData("text/plain");
+  const row = event.target.closest(".chain-row");
+  const tier = Number(zone.dataset.tier) === 2 ? 2 : 1;
+  if (row && row.dataset.name && row.dataset.name !== name) {
+    const box = row.getBoundingClientRect();
+    moveTo(name, row.dataset.name, event.clientY > box.top + box.height / 2);
+  } else appendTo(tier, name);
+});
+
 const MAX_SOURCES = 6;
 let customs = [];
 let scholarCustoms = [];
@@ -979,8 +1060,10 @@ function show(data) {
   chain = [...c.searchProviders];
   timeouts = { ...(c.sourceTimeouts || {}) };
   fallbacks = { ...(c.providerFallbacks || {}) };
+  tiers = { ...(c.providerTiers || {}) };
+  weights = { ...(c.providerWeights || {}) };
   renderChain();
-  for (const id of ["resultsLimit", "resultsMaxChars", "concurrency", "maxTextChars", "referenceTtlSeconds", "cacheSeconds", "sourceFailThreshold", "sourceCooldownSeconds"]) byId(id).value = c[id];
+  for (const id of ["resultsLimit", "resultsMaxChars", "aggregateConcurrency", "concurrency", "maxTextChars", "referenceTtlSeconds", "cacheSeconds", "sourceFailThreshold", "sourceCooldownSeconds"]) byId(id).value = c[id];
   byId("structuredRead").checked = c.structuredRead === true;
   byId("anysearchZone").value = c.anysearchZone;
   byId("searchMode").value = c.searchMode === "hybrid" ? "hybrid" : c.searchMode === "aggregate" ? "aggregate" : "fallback";
@@ -1175,13 +1258,17 @@ byId("factProbe").onclick = async () => {
 byId("f").onsubmit = async (event) => {
   event.preventDefault();
   const config = {};
-  for (const id of ["resultsLimit", "resultsMaxChars", "concurrency", "maxTextChars", "referenceTtlSeconds", "cacheSeconds", "sourceFailThreshold", "sourceCooldownSeconds"]) config[id] = Number(byId(id).value);
+  for (const id of ["resultsLimit", "resultsMaxChars", "aggregateConcurrency", "concurrency", "maxTextChars", "referenceTtlSeconds", "cacheSeconds", "sourceFailThreshold", "sourceCooldownSeconds"]) config[id] = Number(byId(id).value);
   config.searchProviders = chain.slice();
   config.sourceTimeouts = { ...timeouts };
   config.anysearchZone = byId("anysearchZone").value;
   const modeValue = byId("searchMode").value;
   config.searchMode = modeValue === "hybrid" ? "hybrid" : modeValue === "aggregate" ? "aggregate" : "fallback";
   config.providerFallbacks = { ...fallbacks };
+  config.aggregateConcurrency = Number(byId("aggregateConcurrency").value);
+  const onChain = new Set(chain);
+  config.providerTiers = Object.fromEntries(Object.entries(tiers).filter(([name, value]) => onChain.has(name) && value === 2));
+  config.providerWeights = Object.fromEntries(Object.entries(weights).filter(([name, value]) => onChain.has(name) && value >= 1 && value <= 5));
   config.timeoutMs = Number(byId("timeoutSeconds").value) * 1000;
   config.maxPageBytes = Number(byId("pageKiB").value) * 1024;
   config.maxImageBytes = Number(byId("imageKiB").value) * 1024;

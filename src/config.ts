@@ -10,6 +10,7 @@ export const MAX_PROVIDERS = 6;
 export const defaults: SurfConfig = {
   searchProviders: ['anysearch'], searchMode: 'aggregate', braveApiKey: '', tavilyApiKey: '', exaApiKey: '', anysearchApiKey: '', anysearchZone: 'cn',
   proxyUrl: '', timeoutMs: 20_000, sourceTimeouts: {}, providerFallbacks: {},
+  aggregateConcurrency: 2, providerWeights: {}, providerTiers: {},
   maxPageBytes: 2 * 1024 * 1024, maxImageBytes: 8 * 1024 * 1024,
   maxTextChars: 60_000, resultsLimit: 5, structuredRead: true, resultsMaxChars: 8000, referenceTtlSeconds: 600, concurrency: 3, cacheSeconds: 300, sourceFailThreshold: 2, sourceCooldownSeconds: 60,
   scholarEnabled: false, scholarSources: ['arxiv', 'openalex', 'crossref'], scholarMailto: '',
@@ -23,7 +24,7 @@ export function object(input: unknown): Record<string, unknown> {
 const limits = {
   timeoutMs: [1000, 60_000], maxPageBytes: [65536, 4 * 1024 * 1024],
   maxImageBytes: [65536, 16 * 1024 * 1024], maxTextChars: [1000, 100_000],
-  resultsLimit: [1, 10], resultsMaxChars: [0, 40_000], referenceTtlSeconds: [30, 1800], concurrency: [1, 8], cacheSeconds: [0, 3600], sourceFailThreshold: [1, 10], sourceCooldownSeconds: [0, 600],
+  resultsLimit: [1, 10], resultsMaxChars: [0, 40_000], referenceTtlSeconds: [30, 1800], concurrency: [1, 8], aggregateConcurrency: [1, 5], cacheSeconds: [0, 3600], sourceFailThreshold: [1, 10], sourceCooldownSeconds: [0, 600],
 } as const;
 const secrets = [
   ['braveApiKey', 'clearBraveApiKey', 512],
@@ -131,6 +132,33 @@ export function parseConfig(value: unknown): SurfConfig {
       }
       result.sourceTimeouts = map;
     }
+    // 级别与权重：tier 决定“一级 / 二级”，weight 只决定分多少字。二级自己不再挂回退。
+    if (input.providerTiers !== undefined) {
+      const raw = input.providerTiers;
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new SurfError('config_invalid');
+      const entries = Object.entries(raw as Record<string, unknown>);
+      if (entries.length > MAX_PROVIDERS) throw new SurfError('config_invalid');
+      const map: Record<string, 1 | 2> = {};
+      for (const [name, value] of entries) {
+        if (!isProvider(name, customs)) throw new SurfError('config_invalid');
+        if (value !== 1 && value !== 2) throw new SurfError('config_invalid');
+        map[name] = value;
+      }
+      result.providerTiers = map;
+    }
+    if (input.providerWeights !== undefined) {
+      const raw = input.providerWeights;
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new SurfError('config_invalid');
+      const entries = Object.entries(raw as Record<string, unknown>);
+      if (entries.length > MAX_PROVIDERS) throw new SurfError('config_invalid');
+      const map: Record<string, number> = {};
+      for (const [name, value] of entries) {
+        if (!isProvider(name, customs)) throw new SurfError('config_invalid');
+        if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 5) throw new SurfError('config_invalid');
+        map[name] = value;
+      }
+      result.providerWeights = map;
+    }
     if (input.providerFallbacks !== undefined) {
       const raw = input.providerFallbacks;
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new SurfError('config_invalid');
@@ -140,6 +168,7 @@ export function parseConfig(value: unknown): SurfConfig {
       for (const [from, to] of entries) {
         if (typeof to !== 'string' || !isProvider(to, customs)) throw new SurfError('config_invalid');
         if (!isProvider(from, customs) || from === to) throw new SurfError('config_invalid');
+        if (result.providerTiers[from] === 2) throw new SurfError('config_invalid');
         map[from] = to;
       }
       result.providerFallbacks = map;

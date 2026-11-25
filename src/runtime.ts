@@ -397,15 +397,20 @@ export class SurfRuntime implements SurfService {
     });
   }
   /**
-   * 聚合：并发打链上所有来源，各自成段原样列出。
-   * 不排序、不合并——三家谁更相关我们判不了，按出现次数排出来的顺序只是看着像评测。
+   * 聚合：分批并发出链上的来源，各自成段原样列出。不排序、不合并——三家谁更相关我们判不了，
+   * 按出现次数排出来的顺序只是看着像评测。
+   *
+   * 批次：先并发打前 aggregateConcurrency 家（默认 2），去重后的条目还不够 limit 时再补下一家，
+   * 直到够或打完。链序就是主次——一级在前，二级在后。
+   *
+   * 预算：resultsMaxChars 按各家的权重切成份额，权重高的拿得多；一级缺省 3，二级缺省 1。
    * 唯一做的是标重复：同一条 URL 被两家给出时，后来的那条带 dupOf，顶层给 overlap。
    * 条目都在 groups 里，顶层 results 留空，免得同一批内容在回执里出现两遍。
    */
   private async searchAggregated(query: string, limit: number, vertical: ReturnType<typeof verticalOf>, signal: AbortSignal, config: SurfConfig, hybrid = false): Promise<SearchData> {
     const providers = config.searchProviders;
     const mode = hybrid ? 'hybrid' as const : 'aggregate' as const;
-    const cacheKey = this.cacheKey('search-agg', [query, limit, providers, vertical, mode]);
+    const cacheKey = this.cacheKey('search-agg', [query, limit, providers, vertical, mode, config.aggregateConcurrency]);
     const cached = this.cacheGet<SearchData>(cacheKey);
     if (cached) return { ...cached.data, cached: true, cachedAgoMs: cached.agoMs };
     const notes: string[] = [];
@@ -428,61 +433,85 @@ export class SurfRuntime implements SurfService {
         return { results: [], elapsedMs: Math.round(performance.now() - at), error: { code: failure.code, reason: failure.message } };
       }
     };
-    const runs = providers.map(async (provider): Promise<AggregateGroup> => {
+    const raw: (AggregateGroup | undefined)[] = new Array(providers.length).fill(undefined);
+    const runOne = async (index: number): Promise<void> => {
+      const provider = providers[index];
       const cooling = forceAll ? 0 : this.coolingLeft(provider);
-      if (cooling > 0) return { provider, elapsedMs: 0, results: [], skipped: '上次连续失败，冷却中，还剩 ' + cooling + ' 秒' };
+      if (cooling > 0) {
+        raw[index] = { provider, elapsedMs: 0, results: [], skipped: '上次连续失败，冷却中，还剩 ' + cooling + ' 秒' };
+        return;
+      }
       const budget = Math.min(config.sourceTimeouts[provider] ?? config.timeoutMs, config.timeoutMs);
       const main = await attempt(provider, budget);
       if (!main.error && main.results.length > 0) {
         this.noteSourceSuccess(provider);
-        const trimmed = trimResults(annotate(main.results, provider), config.resultsMaxChars);
-        return { provider, sourceKind: kindOf(provider), elapsedMs: main.elapsedMs, results: trimmed.results,
-          ...(trimmed.truncated ? { truncated: trimmed.truncated } : {}) };
+        raw[index] = { provider, sourceKind: kindOf(provider), elapsedMs: main.elapsedMs, results: annotate(main.results, provider) };
+        return;
       }
       // 没拿到结果。失败要记健康；零条算应答，不记账。
       if (main.error) this.noteSourceFailure(config, provider, main.error.code);
       const why = main.error ?? { code: 'search_empty', reason: '来源返回零条结果。' };
-      const secondary = config.providerFallbacks[provider];
-      if (!secondary) return { provider, elapsedMs: main.elapsedMs, results: [], error: why };
-      if (providers.includes(secondary as SearchProvider)) {
+      // 二级来源自己不再挂二级，免得绕成一条链。
+      const secondary = config.providerTiers[provider] === 2 ? '' : config.providerFallbacks[provider];
+      if (!secondary) { raw[index] = { provider, elapsedMs: main.elapsedMs, results: [], error: why }; return; }
+      if (providers.includes(secondary as SearchProvider) && !(forceAll && this.coolingLeft(secondary) > 0)) {
         notes.push(provider + ' 没拿到结果，二级来源 ' + secondary + ' 已经在链上并发打过，这次不重打，看它那一段。');
-        return { provider, elapsedMs: main.elapsedMs, results: [], error: why,
+        raw[index] = { provider, elapsedMs: main.elapsedMs, results: [], error: why,
           standby: { provider: secondary, elapsedMs: 0, reason: why.reason + '（二级已在链上，没有重打）' } };
+        return;
       }
       const backupBudget = Math.min(config.sourceTimeouts[secondary] ?? config.timeoutMs, config.timeoutMs);
       const backup = await attempt(secondary as SearchProvider, backupBudget);
       const total = main.elapsedMs + backup.elapsedMs;
       if (backup.error) {
         this.noteSourceFailure(config, secondary, backup.error.code);
-        return { provider, elapsedMs: total, results: [], error: why,
+        raw[index] = { provider, elapsedMs: total, results: [], error: why,
           standby: { provider: secondary, elapsedMs: backup.elapsedMs, reason: why.reason, error: backup.error } };
+        return;
       }
       if (backup.results.length === 0) {
-        return { provider, elapsedMs: total, results: [], error: why,
+        raw[index] = { provider, elapsedMs: total, results: [], error: why,
           standby: { provider: secondary, elapsedMs: backup.elapsedMs, reason: why.reason, error: { code: 'search_empty', reason: '二级来源也返回零条。' } } };
+        return;
       }
       this.noteSourceSuccess(secondary);
-      const trimmed = trimResults(annotate(backup.results, secondary as SearchProvider), config.resultsMaxChars);
-      return { provider, sourceKind: kindOf(secondary as SearchProvider), elapsedMs: total, results: trimmed.results,
-        ...(trimmed.truncated ? { truncated: trimmed.truncated } : {}), error: why,
+      raw[index] = { provider, sourceKind: kindOf(secondary as SearchProvider), elapsedMs: total, results: annotate(backup.results, secondary as SearchProvider), error: why,
         standby: { provider: secondary, elapsedMs: backup.elapsedMs, reason: why.reason } };
-    });
-    const groups = await Promise.all(runs);
-    if (signal.aborted) throw new SurfError('cancelled');
-    // 总量预算按组顺序分配，先到先得；每段被丢的条数记在各自 truncated 上。
-    let budget = config.resultsMaxChars;
-    if (budget > 0) {
-      for (const group of groups) {
-        const kept: SearchItem[] = [];
-        for (const item of group.results) {
-          const size = JSON.stringify(item).length + 1;
-          if (size <= budget) { kept.push(item); budget -= size; }
-        }
-        if (kept.length !== group.results.length) {
-          group.truncated = (group.truncated ?? 0) + (group.results.length - kept.length);
-          group.results = kept;
-        }
+    };
+    // 跨组去重后的条数：补下一家的判据。
+    const uniqueCount = (): number => {
+      const seen = new Set<string>();
+      for (const group of raw) {
+        if (!group) continue;
+        for (const item of group.results) seen.add(item.url.trim().replace(/#.*$/, ''));
       }
+      return seen.size;
+    };
+    const parallel = Math.max(1, Math.min(config.aggregateConcurrency, providers.length));
+    await Promise.all(Array.from({ length: parallel }, (_, index) => runOne(index)));
+    let cursor = parallel;
+    while (cursor < providers.length && uniqueCount() < limit) {
+      await runOne(cursor);
+      cursor += 1;
+    }
+    if (signal.aborted) throw new SurfError('cancelled');
+    const groups = raw.filter((group): group is AggregateGroup => group !== undefined);
+    if (cursor < providers.length && uniqueCount() >= limit)
+      notes.push('前 ' + cursor + ' 家去重后已经有 ' + uniqueCount() + ' 条，够 limit，剩下的 ' + (providers.length - cursor) + ' 家这次没打。');
+    // 权重切预算：先算份额再裁，不让排在前面的先到先得吃掉整份。
+    const totalChars = config.resultsMaxChars;
+    if (totalChars > 0) {
+      const weights = groups.map(group => this.weightOf(group.provider, config));
+      const sum = weights.reduce((left, right) => left + right, 0) || groups.length;
+      groups.forEach((group, index) => {
+        const share = Math.max(1, Math.floor(totalChars * weights[index] / sum));
+        group.weight = weights[index];
+        group.budgetChars = share;
+        if (group.results.length === 0) return;
+        const trimmed = trimResults(group.results, share);
+        if (trimmed.truncated) group.truncated = (group.truncated ?? 0) + trimmed.truncated;
+        group.results = trimmed.results;
+      });
     }
     // 重复：同一 URL 先出现的算主，后面几家里的标 dupOf。
     const first = new Map<string, string>();
@@ -525,6 +554,13 @@ export class SurfRuntime implements SurfService {
     this.cachePut(config, signal, cacheKey, data);
     return data;
   }
+  /** 权重：配过就用配置的；没配过，一级缺省 3、二级缺省 1。只决定分多少字，不决定谁排前面。 */
+  private weightOf(provider: string, config: SurfConfig): number {
+    const explicit = config.providerWeights[provider];
+    if (typeof explicit === 'number' && Number.isInteger(explicit)) return explicit;
+    return config.providerTiers[provider] === 2 ? 1 : 3;
+  }
+
   /** 学术搜索：四个公开来源顺序回退；连上但零条算应答，不一路试到“全挂”。 */
   scholar(input: ScholarInput & { sessionId: string }, options?: CallOptions): Promise<OperationResult<ScholarData>> {
     return this.execute(input?.sessionId, options, async (_session, signal) => {
