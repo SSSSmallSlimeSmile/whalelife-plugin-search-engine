@@ -41,6 +41,8 @@ export interface SurfConfig {
   anysearchApiKey: string;
   anysearchZone: SearchZone;
   proxyUrl: string;
+  /** 对外 HTTP 接口的令牌。空 = 接口关闭。明文存盘，页面上能看能换。 */
+  apiToken: string;
   timeoutMs: number;
   /** 每个来源单独的上限（毫秒）。没写的来源按整体预算分配。 */
   sourceTimeouts: Record<string, number>;

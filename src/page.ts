@@ -259,6 +259,19 @@ export const settingsPage = `<!doctype html>
 <div class="pg-item"><span class="pg-label">结构化读取</span>
 <span class="pg-check"><input id="structuredRead" type="checkbox" name="structuredRead"><span class="pg-label">命中 GitHub / Stack Exchange / arXiv / 维基百科时改走公开 API</span></span>
 <p class="pg-hint">取的是结构化字段，不是页面快照：GitHub 的 issue / PR / release 会拆出状态、标签、正文和评论；Stack Exchange 的回答按票数排、已采纳的排在前面；arXiv 取元数据与摘要；维基百科取纯文本正文。这几个接口都不需要 Key。解析没成会回落成普通抓取，回执里写明原因。</p></div>
+<div class="pg-item" style="margin-top:16px"><span class="pg-label">对外接口</span>
+<p class="pg-hint" style="margin-top:0">别的程序（脚本、别的 agent）可以按令牌调 search / scholar / facts / status。不开放“读网页”——那等于把任意 URL 的出口借出去。令牌空着就是不开放，填了立刻生效，清空立刻关。</p></div>
+<div class="pg-pair">
+<div class="pg-item"><label class="pg-row"><span class="pg-label">令牌（16–128 位字母数字）</span><input type="text" name="apiToken" id="apiToken" autocomplete="off" placeholder="留空 = 不开放"></label>
+<p class="pg-hint">明文存盘，页面能看能改。谁拿到都能花你的额度，随时清空即可关闭。</p></div>
+<div class="pg-item"><span class="pg-label">生成一个</span>
+<p class="pg-hint" style="margin-top:0"><button type="button" class="btn" id="apiGen">随机生成</button> 生成完要点右上角「保存」才落盘。</p></div>
+</div>
+<div class="pg-item"><span class="pg-label">怎么调</span>
+<p class="pg-hint" style="margin-top:0">接口走宿主的登录态，第一步先拿 cookie（网页没设密码时这么拿）：</p>
+<p class="pg-hint" style="margin-top:0">1. curl -i -X POST http://127.0.0.1:9270/api/login -H "Content-Type: application/json" -d "{\"password\":\"\"}"　→ 从 Set-Cookie 里取 whale=…</p>
+<p class="pg-hint" style="margin-top:0">2. curl -X POST http://127.0.0.1:9270/plugins/search-engine/api -H "Content-Type: application/json" -H "x-search-token: 你的令牌" -H "Cookie: whale=…" -d "{\"tool\":\"search\",\"query\":\"prompt caching\",\"limit\":5}"</p>
+<p class="pg-hint" style="margin-top:0">tool 可传 search（query / limit / more / tag / params / zone / language）、scholar（query / limit / sources / yearMin）、facts（query / limit / sources / lang）、status。回执和工具那边同一份。</p></div>
 </section>
 
 <section class="pg-group" id="pg-scholar" hidden>
@@ -1097,6 +1110,7 @@ function show(data) {
   byId("factsLang").value = c.factsLang || "zh";
   restoreSourceOrder(".fact-src", c.factsSources || []);
   syncSrcCards();
+  byId("apiToken").value = c.apiToken || "";
   byId("save").disabled = false;
 }
 
@@ -1301,6 +1315,12 @@ byId("factProbe").onclick = async () => {
     msg.textContent = "没通 · " + (error && error.message ? error.message : error);
   }
 };
+byId("apiGen").onclick = () => {
+  const bytes = new Uint8Array(18);
+  crypto.getRandomValues(bytes);
+  byId("apiToken").value = Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
+  byId("apiToken").focus();
+};
 byId("f").onsubmit = async (event) => {
   event.preventDefault();
   const config = {};
@@ -1331,6 +1351,7 @@ byId("f").onsubmit = async (event) => {
   });
   config.factsCustomSources = factCustoms.map(plainCustom);
   config.structuredRead = byId("structuredRead").checked;
+  config.apiToken = byId("apiToken").value.trim();
   config.scholarEnabled = byId("scholarEnabled").checked;
   config.scholarMailto = byId("scholarMailto").value.trim();
   config.scholarSources = [...document.querySelectorAll(".scholar-src")].filter(box => box.checked).map(box => box.value);

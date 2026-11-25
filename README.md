@@ -315,6 +315,54 @@ AnySearch 的 tag 不是自由词。实测裸词（`academic`、`news`、`securi
 
 设置页「读取」里可以整个关掉（`structuredRead`），关掉就只走页面抓取。
 
+## 给别的插件用（服务）
+
+插件启动时 `ctx.provide('search-engine', service)`。别的插件不用发 HTTP、不用令牌：
+
+```ts
+const search = ctx.get('search-engine');
+const result = await search.search({ query: 'prompt caching', limit: 5, sessionId: session.id }, { signal });
+// { status: 'ok', data } 或 { status: 'error', error }，不抛异常
+```
+
+服务上的方法与工具一一对应：`status / settings / search / scholar / facts / read / image / prepareCollection`，回执和工具那边同一份 `OperationResult`。
+
+`sessionId` 必须带：页面引用、图片引用、翻页的 `setId` 都按会话归属，传空会回 `session_required`。服务这一层 `read` 是开的（毕竟调用方本来就跑在宿主里），但不等于可以借给外部程序，见下一节。
+
+## 对外 HTTP 接口（可选，默认关）
+
+设置页「读取」页最下面一栏填一个令牌就开，清空就关。令牌 16–128 位，字母数字加 `-` `_`。
+
+```sh
+# 1. 先拿宿主登录 cookie（网页没设访问密码时下面这条就行）
+curl -i -X POST http://127.0.0.1:9270/api/login \
+  -H "Content-Type: application/json" -d "{\"password\":\"\"}"
+
+# 2. 调接口，令牌走 x-search-token（也认 Authorization: Bearer）
+curl -X POST http://127.0.0.1:9270/plugins/search-engine/api \
+  -H "Content-Type: application/json" \
+  -H "x-search-token: 你的令牌" \
+  -H "Cookie: whale=…" \
+  -d "{\"tool\":\"search\",\"query\":\"prompt caching\",\"limit\":5}"
+```
+
+`tool` 有四个：
+
+| tool | 收什么 | 回什么 |
+|---|---|---|
+| `search` | query / limit / more / tag / params / zone / language | 同 `search_web` |
+| `scholar` | query / limit / sources / yearMin | 同 `search_scholar` |
+| `facts` | query / limit / sources / lang | 同 `search_facts` |
+| `status` | 无 | 同 `search_status` |
+
+状态码：没设令牌 `403 api_disabled`，令牌不对 `401 api_unauthorized`，参数不对 `400`，成功 `200`。
+
+**不开放 `read`。** 它能读任意 URL，等于把 SSRF 的出口借出去，所以 `tool:"read"` 一律 400。要读网页，就在插件里调服务。
+
+**边界**：令牌明文存在 `data/config.json`，页面上能看能改；谁拿到都能花你的额度（AnySearch、Exa 都是计费的），别贴进公开仓库。也不隔离会话——所有调用都归到 `api-client` 名下，页面引用和图片引用对它无效。
+
+实测（2026-11-26，真宿主 9270）：未设令牌 403、错令牌 401、无令牌 401、对令牌 status 200、search 200（groups 2 段、带 setId，翻页 shown 5 / available 11 / hasMore true）、facts 200（5 条）、`tool:"read"` 400、清空令牌后再调 403。
+
 ## 内容与能力边界
 
 网页和搜索结果是外部数据，不能改变权限或成为系统指令。网络只允许公开 HTTP(S) 地址，每次跳转重新校验 DNS 并固定已验证 IP，拒绝内网、环回、链接本地及凭据 URL。图片也经过同一访问限制。本站账号 Cookies 不在父插件中维护，遇到登录或验证要求会报告受限，不绕过限制。

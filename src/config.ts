@@ -9,7 +9,7 @@ import { isFactSource } from './facts.ts';
 export const MAX_PROVIDERS = 6;
 export const defaults: SurfConfig = {
   searchProviders: ['anysearch'], searchMode: 'aggregate', braveApiKey: '', tavilyApiKey: '', exaApiKey: '', anysearchApiKey: '', anysearchZone: 'cn',
-  proxyUrl: '', timeoutMs: 20_000, sourceTimeouts: {}, providerFallbacks: {},
+  proxyUrl: '', apiToken: '', timeoutMs: 20_000, sourceTimeouts: {}, providerFallbacks: {},
   aggregateConcurrency: 2, providerWeights: {}, providerTiers: {},
   maxPageBytes: 2 * 1024 * 1024, maxImageBytes: 8 * 1024 * 1024,
   maxTextChars: 60_000, resultsLimit: 5, structuredRead: true, resultsMaxChars: 8000, referenceTtlSeconds: 600, concurrency: 3, cacheSeconds: 300, sourceFailThreshold: 2, sourceCooldownSeconds: 60,
@@ -113,6 +113,12 @@ export function parseConfig(value: unknown): SurfConfig {
       const raw = input[key];
       if (typeof raw !== 'string' || raw.length > max || /[\x00-\x20\x7f]/.test(raw)) throw new SurfError('config_invalid');
       result[key] = raw;
+    }
+    if (input.apiToken !== undefined) {
+      const token = input.apiToken;
+      if (typeof token !== 'string' || token.length > 128 || (token !== '' && !/^[A-Za-z0-9_-]{16,128}$/.test(token)))
+        throw new SurfError('config_invalid');
+      result.apiToken = token;
     }
     if (result.proxyUrl) {
       const proxy = new URL(result.proxyUrl);

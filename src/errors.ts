@@ -18,6 +18,7 @@ export const messages = {
   image_unavailable: '未能准备图片，请稍后重新选择。',
   busy: '当前浏览请求已满，请等待已发起的请求完成。', config_invalid: '配置无效。',
   config_conflict: '配置已被其他页面修改，请刷新后再保存。', host_required: '宿主缺少临时工具接口，请升级宿主。',
+  api_disabled: '对外接口没开：先在设置页填一个令牌。', api_unauthorized: '令牌不对。',
 } as const;
 export type ErrorCode = keyof typeof messages;
 export class SurfError extends Error {

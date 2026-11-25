@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  * Additional terms under AGPLv3 Section 7: see LICENSE-ADDITIONAL.
  */
-import { randomUUID } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import type { Context, PluginHandler, ToolSession, TransientToolOutput } from 'whalelife';
 import { defaults, parseConfig, publicConfig, updateConfig, object } from './config.ts';
 import { SurfError, safeError } from './errors.ts';
@@ -178,7 +178,8 @@ export async function applyWithDependencies(ctx: Context, dependencies: Dependen
     catch (error) {
       if (!res.headersSent) {
         const safe = error instanceof SurfError ? safeError(error) : safeError(new SurfError('config_invalid'));
-        res.statusCode = safe.code === 'config_conflict' ? 409 : 400;
+        res.statusCode = safe.code === 'config_conflict' ? 409
+          : safe.code === 'api_unauthorized' ? 401 : safe.code === 'api_disabled' ? 403 : 400;
         res.setHeader('Content-Type', 'application/json; charset=utf-8'); res.end(JSON.stringify({ ok: false, error: safe }));
       } else if (!res.writableEnded) res.end();
     }
@@ -245,6 +246,35 @@ export async function applyWithDependencies(ctx: Context, dependencies: Dependen
     const body = object(await readJsonBody(req, AbortSignal.timeout(30_000)));
     const result = await runtime.probeJson({ url: body.url as string | undefined, method: body.method as string | undefined,
       key: body.key as string | undefined, query: body.query as string | undefined });
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.end(JSON.stringify(result));
+  }));
+  /** 定长比较：先比长度，长度一致才逐字节比，免得从耗时上摸出令牌。 */
+  const sameToken = (given: string, expected: string) => {
+    const a = Buffer.from(given), b = Buffer.from(expected);
+    return a.length === b.length && timingSafeEqual(a, b);
+  };
+  // 对外 HTTP 接口：给别的程序用，令牌在设置页里填，空着就是关着。
+  // 不开放 read —— 那等于把任意 URL 的出口借给别人。
+  ctx.web.api('/plugins/search-engine/api', wrap(async (req, res) => {
+    if (req.method !== 'POST') { res.statusCode = 405; res.end(); return; }
+    const expected = config.apiToken;
+    if (!expected) throw new SurfError('api_disabled');
+    const header = String(req.headers['x-search-token'] ?? '').trim() ||
+      String(req.headers.authorization ?? '').replace(/^Bearer\s+/i, '').trim();
+    if (!sameToken(header, expected)) throw new SurfError('api_unauthorized');
+    const body = object(await readJsonBody(req, AbortSignal.timeout(60_000), { maxBytes: 8_192 }));
+    const sessionId = 'api-client';
+    let result: unknown;
+    if (body.tool === 'status') result = runtime.status();
+    else if (body.tool === 'search') result = await runtime.search({ query: body.query, limit: body.limit,
+      more: body.more, tag: body.tag, params: body.params, zone: body.zone, language: body.language,
+      sessionId } as SearchInput & { sessionId: string });
+    else if (body.tool === 'scholar') result = await runtime.scholar({ query: body.query, limit: body.limit,
+      sources: body.sources, yearMin: body.yearMin, sessionId } as ScholarInput & { sessionId: string });
+    else if (body.tool === 'facts') result = await runtime.facts({ query: body.query, limit: body.limit,
+      sources: body.sources, lang: body.lang, sessionId } as FactInput & { sessionId: string });
+    else throw new SurfError('invalid_input');
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.end(JSON.stringify(result));
   }));
