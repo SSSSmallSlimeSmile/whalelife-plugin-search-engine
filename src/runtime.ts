@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import type { OptionalService } from 'whalelife';
 import { publicConfig, object } from './config.ts';
 import { SurfError, SearchExhaustedError, ProviderError, safeError } from './errors.ts';
-import { parsePage, parseBing, parseDuckDuckGo, parseBrave, parseAnySearch } from './content.ts';
+import { parsePage, parseDuckDuckGo, parseBrave, parseAnySearch } from './content.ts';
 import { isJsonSource, buildJsonRequest, parseJsonSearch } from './jsonsources.ts';
 import { buildCustomRequest, parseCustom, guessJsonShape } from './custom.ts';
 import type { JsonShapeGuess } from './custom.ts';
@@ -29,7 +29,7 @@ const PAGE_CHUNK = 6000;
  */
 function kindOf(provider: SearchProvider): SourceKind {
   if (provider.startsWith('custom:')) return 'custom';
-  return provider === 'bing' || provider === 'duckduckgo' ? 'html' : 'api';
+  return provider === 'duckduckgo' ? 'html' : 'api';
 }
 /** 给每条结果盖上 via 与 domain。域名叫不出名字就只盖 via，不编一个。 */
 function annotate(results: SearchItem[], provider: SearchProvider): SearchItem[] {
@@ -722,7 +722,7 @@ export class SurfRuntime implements SurfService {
       return parseJsonSearch(provider, response.body, limit);
     }
     const url = new URL(provider === 'brave' ? 'https://api.search.brave.com/res/v1/web/search'
-      : provider === 'bing' ? 'https://cn.bing.com/search' : 'https://html.duckduckgo.com/html/');
+      : 'https://html.duckduckgo.com/html/');
     url.searchParams.set('q', query);
     if (provider === 'brave') url.searchParams.set('count', String(limit));
     const response = await this.fetcher.get(url.href, { signal, timeoutMs,
@@ -730,7 +730,7 @@ export class SurfRuntime implements SurfService {
       headers: provider === 'brave' ? { 'X-Subscription-Token': config.braveApiKey, Accept: 'application/json' } : { Accept: 'text/html' } });
     checkResponse(response.status);
     return provider === 'brave' ? parseBrave(response.body, limit)
-      : provider === 'bing' ? parseBing(response.body, response.url, limit) : parseDuckDuckGo(response.body, response.url, limit);
+      : parseDuckDuckGo(response.body, response.url, limit);
   }
   /** AnySearch 走 POST JSON；没配 Key 时用它的匿名额度。跳转一律不跟，正文不外发。 */
   private async searchAnySearch(query: string, limit: number, signal: AbortSignal, timeoutMs: number, vertical: Vertical, config: SurfConfig) {

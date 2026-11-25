@@ -224,65 +224,6 @@ export function parseDuckDuckGo(body: Buffer, url: string, limit: number): Searc
   throw new SurfError('search_parse');
 }
 
-function isBingHost(host: string): boolean {
-  return host === 'bing.com' || host.endsWith('.bing.com');
-}
-
-function bingNavigation(url: URL): boolean {
-  return isBingHost(url.hostname) && /^\/(?:$|(?:ck|aclick|search|images|videos|maps|news|chat|copilot)(?:\/|$))/i.test(url.pathname);
-}
-
-function bingTarget(raw: string | undefined, base: string): string | undefined {
-  if (!raw) return;
-  try {
-    let target = new URL(raw, base);
-    if (isBingHost(target.hostname) && /^\/ck\/a\/?$/i.test(target.pathname)) {
-      const encoded = target.searchParams.get('u');
-      if (!encoded?.startsWith('a1')) return;
-      const value = encoded.slice(2);
-      if (!/^[A-Za-z0-9_-]+={0,2}$/.test(value) || value.length > MAX_URL * 2) return;
-      const bytes = Buffer.from(value, 'base64url');
-      // Buffer's decoder is intentionally permissive; require a canonical payload here.
-      if (bytes.toString('base64url') !== value.replace(/=+$/, '')) return;
-      const decoded = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-      const resolved = webUrl(decoded);
-      if (!resolved) return;
-      target = new URL(resolved);
-    }
-    if (bingNavigation(target)) return;
-    return webUrl(target.href);
-  } catch { return; }
-}
-
-/** Public Bing HTML adapter. Redirect wrappers are resolved locally, never fetched. */
-export function parseBing(body: Buffer, url: string, limit: number): SearchItem[] {
-  searchLimit(limit);
-  const base = webUrl(url);
-  if (!base) throw new SurfError('unsafe_url');
-  const $ = document(body);
-  rejectBlockingPage($);
-  if ($('#b_captcha,#b_captchaform,#captchaform,.b_captcha').length) throw new SurfError('access_blocked');
-  removeNoise($);
-  const results: SearchItem[] = [];
-  const seen = new Set<string>();
-  const anchors = $('#b_results .b_algo h2 a');
-  anchors.each((_index, element) => {
-    if (results.length >= limit || $(element).closest('.b_ad,.b_ads,.b_sponsored,.sponsored,[data-tag="ad"],[data-type="ad"]').length) return;
-    const target = bingTarget($(element).attr('href'), base);
-    const title = clipped(textOf([element]), 300);
-    if (!target || !title || seen.has(target)) return;
-    const item = $(element).closest('.b_algo');
-    const caption = item.find('.b_caption p').first();
-    const snippet = caption.length ? textOf(caption.toArray()) : textOf(item.find('p').first().toArray());
-    seen.add(target);
-    results.push({ title, url: target, snippet: clipped(snippet, 1200) });
-  });
-  if (results.length) return results;
-  if (anchors.length) throw new SurfError('search_parse');
-  if ($('#b_results .b_no,#b_results .b_no_results,#b_results .b_noResults').length) return [];
-  throw new SurfError('search_parse');
-}
-
 function inlineText(value: string): string {
   const $ = load(value);
   removeNoise($);
