@@ -21,6 +21,7 @@ import type { PublicFetcher, SurfConfig, SurfService, SurfStatus, OperationResul
 type StoredPage = ParsedPage & { sessionId: string; url: string; expires: number };
 type StoredOffer = { sessionId: string; binding: OptionalService<VisionService>; media: ImageData; expires: number };
 type StoredCollectionOffer = { sessionId: string; binding: OptionalService<GalleryService>; media: GalleryImageData; expires: number };
+const MIN_ATTEMPT_MS = 1;
 const PAGE_CHUNK = 6000;
 /**
  * 这条结果是怎么来的。官方 JSON 接口回来的字段是可预期的；解析对方页面回来的，人家改一次版就变形；
@@ -457,14 +458,15 @@ export class SurfRuntime implements SurfService {
         const started = performance.now();
         const remaining = deadline - started;
         let limitSignal: AbortSignal | undefined;
+        let attemptBudget = 0;
         try {
-          if (remaining < 1) throw new SurfError('timeout');
+          if (remaining < MIN_ATTEMPT_MS) throw new SurfError('budget_exhausted');
           const cooling = forceAll ? 0 : this.coolingLeft(provider);
           if (cooling > 0) {
             fallback.push({ provider, elapsedMs: 0, code: 'source_cooling', reason: '上次连续失败，冷却中，还剩 ' + cooling + ' 秒，这次跳过。' });
             continue;
           }
-          const timeoutMs = this.sourceBudget(config, provider, index, providers.length, remaining);
+          const timeoutMs = attemptBudget = this.sourceBudget(config, provider, index, providers.length, remaining);
           limitSignal = AbortSignal.timeout(timeoutMs);
           const attemptSignal = AbortSignal.any([signal, limitSignal]);
           const results = await untilCancelled(attemptSignal, () => this.searchSource(provider, input.query.trim(), limit, attemptSignal, timeoutMs, vertical, config));
@@ -473,6 +475,7 @@ export class SurfRuntime implements SurfService {
           if (results.length === 0) {
             // 连上了、返回零条：这是答案不是故障。记下原因，继续试下一个来源。
             answeredCode = 'search_empty';
+            this.noteSourceSuccess(provider);
             fallback.push({ provider, elapsedMs: Math.round(performance.now() - started), code: 'search_empty', reason: '来源返回零条结果。' });
             continue;
           }
@@ -485,11 +488,22 @@ export class SurfRuntime implements SurfService {
           return found;
         } catch (error) {
           if (signal.aborted) throw new SurfError('cancelled');
-          const failure = safeError(limitSignal?.aborted || performance.now() >= deadline || remaining < 1
-            ? new SurfError('timeout') : error);
-          lastCode = failure.code;
-          this.noteSourceFailure(config, provider, failure.code);
-          fallback.push({ provider, elapsedMs: Math.round(performance.now() - started), code: failure.code, reason: failure.message });
+          // 总预算到点、或者根本没轮到它：这一条不该算成它的失败，否则好来源会被冷却掉。
+          // 只分到不到平时一半的时间（被前一家吃掉预算）：这一条不该算成它的失败，否则好来源会被冷却掉。
+          const nominalBudget = Math.min(config.sourceTimeouts[provider] ?? config.timeoutMs, config.timeoutMs);
+          const squeezed = attemptBudget > 0 && attemptBudget * 2 < nominalBudget;
+          const outOfBudget = squeezed
+            || (error instanceof SurfError && error.code === 'budget_exhausted');
+          // untilCancelled 在预算到点时抛的是 cancelled，这里换回 timeout——那是它自己那份时间用完了。
+          const expired = limitSignal?.aborted === true || (error instanceof SurfError && error.code === 'timeout');
+          const failure = safeError(expired ? new SurfError('timeout') : error);
+          if (outOfBudget) {
+            fallback.push({ provider, elapsedMs: 0, code: 'budget_exhausted', reason: '总预算用尽，这一家没跑完或没轮上——不算它的失败。' });
+          } else {
+            lastCode = failure.code;
+            this.noteSourceFailure(config, provider, failure.code);
+            fallback.push({ provider, elapsedMs: Math.round(performance.now() - started), code: failure.code, reason: failure.message });
+          }
         }
       }
       throw new SearchExhaustedError(answered && answeredCode ? answeredCode : providers.length === 1 ? lastCode : 'search_exhausted',
@@ -551,8 +565,9 @@ export class SurfRuntime implements SurfService {
         raw[index] = { provider, sourceKind: kindOf(provider), elapsedMs: main.elapsedMs, results: annotate(main.results, provider) };
         return;
       }
-      // 没拿到结果。失败要记健康；零条算应答，不记账。
+      // 没拿到结果。真失败记健康；零条算应答——应答要把旧账清掉，不然上一次的残留会一路带着。
       if (main.error) this.noteSourceFailure(config, provider, main.error.code);
+      else this.noteSourceSuccess(provider);
       const why = main.error ?? { code: 'search_empty', reason: '来源返回零条结果。' };
       // 二级来源自己不再挂二级，免得绕成一条链。
       const secondary = config.providerTiers[provider] === 2 ? '' : config.providerFallbacks[provider];
@@ -573,6 +588,7 @@ export class SurfRuntime implements SurfService {
         return;
       }
       if (backup.results.length === 0) {
+        this.noteSourceSuccess(secondary as SearchProvider);
         raw[index] = { provider, elapsedMs: total, results: [], error: why,
           standby: { provider: secondary, elapsedMs: backup.elapsedMs, reason: why.reason, error: { code: 'search_empty', reason: '二级来源也返回零条。' } } };
         return;
@@ -745,8 +761,9 @@ export class SurfRuntime implements SurfService {
         raw[index] = { source, elapsedMs: one.elapsedMs, items: kept };
         return;
       }
-      // 零条算应答，不记健康账；真失败才记。
+      // 零条算应答：不加分，但要把旧账清掉；真失败才记。
       if (one.error) this.noteSourceFailure(config, source, one.error.code);
+      else this.noteSourceSuccess(source);
       raw[index] = { source, elapsedMs: one.elapsedMs, items: [],
         error: one.error ?? { code: 'search_empty', reason: '来源返回零条结果。' } };
     };
@@ -870,14 +887,15 @@ export class SurfRuntime implements SurfService {
         const started = performance.now();
         const remaining = deadline - started;
         let limitSignal: AbortSignal | undefined;
+        let attemptBudget = 0;
         try {
-          if (remaining < 1) throw new SurfError('timeout');
+          if (remaining < MIN_ATTEMPT_MS) throw new SurfError('budget_exhausted');
           const cooling = forceAll ? 0 : this.coolingLeft(source);
           if (cooling > 0) {
             fallback.push({ provider: source as unknown as SearchProvider, elapsedMs: 0, code: 'source_cooling', reason: '上次连续失败，冷却中，还剩 ' + cooling + ' 秒，这次跳过。' });
             continue;
           }
-          const timeoutMs = this.sourceBudget(config, source, index, sources.length, remaining);
+          const timeoutMs = attemptBudget = this.sourceBudget(config, source, index, sources.length, remaining);
           limitSignal = AbortSignal.timeout(timeoutMs);
           const attemptSignal = AbortSignal.any([signal, limitSignal]);
           const request = buildRequest(source, query, limit, config.scholarMailto, config.scholarCustomSources, config.semanticScholarApiKey);
@@ -895,6 +913,7 @@ export class SurfRuntime implements SurfService {
           const notes: string[] = [];
           if (kept.length === 0) {
             answeredCode = 'search_empty';
+            this.noteSourceSuccess(source);
             fallback.push({ provider: source as unknown as SearchProvider, elapsedMs: Math.round(performance.now() - started),
               code: 'search_empty', reason: '来源返回零条结果。' });
             continue;
@@ -907,12 +926,23 @@ export class SurfRuntime implements SurfService {
           return found;
         } catch (error) {
           if (signal.aborted) throw new SurfError('cancelled');
-          const failure = safeError(limitSignal?.aborted || performance.now() >= deadline || remaining < 1
-            ? new SurfError('timeout') : error);
-          lastCode = failure.code;
-          this.noteSourceFailure(config, source, failure.code);
-          fallback.push({ provider: source as unknown as SearchProvider, elapsedMs: Math.round(performance.now() - started),
+          // 总预算到点、或者根本没轮到它：这一条不该算成它的失败，否则好来源会被冷却掉。
+          // 只分到不到平时一半的时间（被前一家吃掉预算）：这一条不该算成它的失败，否则好来源会被冷却掉。
+          const nominalBudget = Math.min(config.sourceTimeouts[source] ?? config.timeoutMs, config.timeoutMs);
+          const squeezed = attemptBudget > 0 && attemptBudget * 2 < nominalBudget;
+          const outOfBudget = squeezed
+            || (error instanceof SurfError && error.code === 'budget_exhausted');
+          // untilCancelled 在预算到点时抛的是 cancelled，这里换回 timeout——那是它自己那份时间用完了。
+          const expired = limitSignal?.aborted === true || (error instanceof SurfError && error.code === 'timeout');
+          const failure = safeError(expired ? new SurfError('timeout') : error);
+          if (outOfBudget) {
+            fallback.push({ provider: source as unknown as SearchProvider, elapsedMs: 0, code: 'budget_exhausted', reason: '总预算用尽，这一家没跑完或没轮上——不算它的失败。' });
+          } else {
+            lastCode = failure.code;
+            this.noteSourceFailure(config, source, failure.code);
+            fallback.push({ provider: source as unknown as SearchProvider, elapsedMs: Math.round(performance.now() - started),
             code: failure.code, reason: failure.message });
+          }
         }
       }
       throw new SearchExhaustedError(answered && answeredCode ? answeredCode : sources.length === 1 ? lastCode : 'search_exhausted',
@@ -952,14 +982,15 @@ export class SurfRuntime implements SurfService {
         const started = performance.now();
         const remaining = deadline - started;
         let limitSignal: AbortSignal | undefined;
+        let attemptBudget = 0;
         try {
-          if (remaining < 1) throw new SurfError('timeout');
+          if (remaining < MIN_ATTEMPT_MS) throw new SurfError('budget_exhausted');
           const cooling = forceAll ? 0 : this.coolingLeft(source);
           if (cooling > 0) {
             fallback.push({ source, elapsedMs: 0, code: 'source_cooling', reason: '上次连续失败，冷却中，还剩 ' + cooling + ' 秒，这次跳过。' });
             continue;
           }
-          const timeoutMs = this.sourceBudget(config, source, index, sources.length, remaining);
+          const timeoutMs = attemptBudget = this.sourceBudget(config, source, index, sources.length, remaining);
           limitSignal = AbortSignal.timeout(timeoutMs);
           const attemptSignal = AbortSignal.any([signal, limitSignal]);
           const request = buildFactRequest(source, query, limit, lang, config.factsCustomSources);
@@ -975,6 +1006,7 @@ export class SurfRuntime implements SurfService {
           answered = true;
           if (items.length === 0) {
             answeredCode = 'search_empty';
+            this.noteSourceSuccess(source);
             fallback.push({ source, elapsedMs: Math.round(performance.now() - started), code: 'search_empty',
               reason: '来源返回零条结果。' });
             continue;
@@ -986,11 +1018,22 @@ export class SurfRuntime implements SurfService {
           return found;
         } catch (error) {
           if (signal.aborted) throw new SurfError('cancelled');
-          const failure = safeError(limitSignal?.aborted || performance.now() >= deadline || remaining < 1
-            ? new SurfError('timeout') : error);
-          lastCode = failure.code;
-          this.noteSourceFailure(config, source, failure.code);
-          fallback.push({ source, elapsedMs: Math.round(performance.now() - started), code: failure.code, reason: failure.message });
+          // 总预算到点、或者根本没轮到它：这一条不该算成它的失败，否则好来源会被冷却掉。
+          // 只分到不到平时一半的时间（被前一家吃掉预算）：这一条不该算成它的失败，否则好来源会被冷却掉。
+          const nominalBudget = Math.min(config.sourceTimeouts[source] ?? config.timeoutMs, config.timeoutMs);
+          const squeezed = attemptBudget > 0 && attemptBudget * 2 < nominalBudget;
+          const outOfBudget = squeezed
+            || (error instanceof SurfError && error.code === 'budget_exhausted');
+          // untilCancelled 在预算到点时抛的是 cancelled，这里换回 timeout——那是它自己那份时间用完了。
+          const expired = limitSignal?.aborted === true || (error instanceof SurfError && error.code === 'timeout');
+          const failure = safeError(expired ? new SurfError('timeout') : error);
+          if (outOfBudget) {
+            fallback.push({ source, elapsedMs: 0, code: 'budget_exhausted', reason: '总预算用尽，这一家没跑完或没轮上——不算它的失败。' });
+          } else {
+            lastCode = failure.code;
+            this.noteSourceFailure(config, source, failure.code);
+            fallback.push({ source, elapsedMs: Math.round(performance.now() - started), code: failure.code, reason: failure.message });
+          }
         }
       }
       throw new SearchExhaustedError(answered && answeredCode ? answeredCode : sources.length === 1 ? lastCode : 'search_exhausted',
@@ -1137,6 +1180,8 @@ export class SurfRuntime implements SurfService {
       headers: { Accept: 'application/json', 'Content-Type': 'application/json',
         ...(config.anysearchApiKey ? { Authorization: 'Bearer ' + config.anysearchApiKey } : {}) },
     });
+    // 402 是额度耗尽：不带上游正文，那里可能带着账号或 key。
+    if (response.status === 402) throw new ProviderError('search_quota', '');
     // 4xx 时来源通常会说清缺什么（缺哪个参数、tag 是否有效），这比笼统的 http_error 有用。
     if (response.status < 200 || response.status > 299) {
       const code = [401, 403, 429].includes(response.status) ? 'access_blocked'
