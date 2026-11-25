@@ -30,7 +30,11 @@ export const settingsPage = `<!doctype html>
 .pg-actions{display:flex;align-items:center;gap:12px;margin-left:auto}
 #msg{font-size:13px;color:#797e8c}
 #msg.err{color:#b91c1c}
-.chain{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px}
+.chain{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:minmax(0,1fr);gap:8px}
+.chain-row.primary{border-width:2px}
+.chain-standby{display:flex;align-items:center;gap:8px;margin:-2px 0 0 16px;padding:6px 10px;border:1px dashed rgba(124,92,255,.45);border-radius:9px;background:rgba(124,92,255,.03);font-size:12px;color:#797e8c}
+.chain-standby select{font-size:12px;padding:2px 6px;max-width:200px}
+.chain-standby em{font-style:normal;color:#9aa0b0}
 .chain-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:6px 8px;padding:8px 10px;border:1px solid rgba(124,92,255,.45);border-radius:9px;background:rgba(124,92,255,.06);box-shadow:0 0 0 1px rgba(124,92,255,.18),0 2px 10px rgba(124,92,255,.14),0 0 16px rgba(124,92,255,.10);font-size:13px;cursor:grab}
 .chain-row:hover{box-shadow:0 0 0 1px rgba(124,92,255,.55),0 3px 14px rgba(124,92,255,.24),0 0 22px rgba(124,92,255,.20)}
 .chain-row.drag{opacity:.45}
@@ -400,12 +404,41 @@ document.addEventListener("change", (event) => {
   const tag = event.target;
   if (tag && tag.matches && tag.matches(".scholar-src,.fact-src")) syncSrcCards();
 });
+/** 主位能选的二级：排除自己和链上已有的（它们本来就在并发里打）。 */
+function standbyChoices(name) {
+  const used = new Set(chain);
+  const all = STANDBY_OPTIONS.concat(customs.map(item => "custom:" + item.name));
+  return all.filter(item => item !== name && !used.has(item));
+}
+/** 首位下面那条虚线：给主位配一个二级来源。 */
+function standbyRow(name) {
+  const li = document.createElement("li");
+  li.className = "chain-standby";
+  const text = document.createElement("span");
+  text.textContent = "主位没拿到结果时，用";
+  const sel = document.createElement("select");
+  sel.id = "chainStandby";
+  const opts = standbyChoices(name);
+  sel.innerHTML = '<option value="">（不设，就空着）</option>'
+    + opts.map(item => '<option value="' + item + '">' + item + '</option>').join("");
+  const saved = fallbacks[name] || "";
+  sel.value = opts.includes(saved) ? saved : "";
+  const hint = document.createElement("em");
+  hint.textContent = opts.length ? "" : "链上其它来源都在并发里，没有可选的二级";
+  sel.addEventListener("change", () => {
+    if (sel.value) fallbacks[name] = sel.value;
+    else delete fallbacks[name];
+    hint.textContent = "已记下，点右上「保存」生效";
+  });
+  li.append(text, sel, hint);
+  return li;
+}
 function renderChain() {
   const list = byId("chain");
   list.textContent = "";
   chain.forEach((name, index) => {
     const row = document.createElement("li");
-    row.className = "chain-row";
+    row.className = index === 0 ? "chain-row primary" : "chain-row";
     row.draggable = true;
     row.dataset.index = String(index);
     const grip = document.createElement("span"); grip.className = "grip"; grip.textContent = "\u2261";
@@ -418,6 +451,7 @@ function renderChain() {
     btns.append(msg);
     row.append(grip, label, order, btns);
     list.append(row);
+    if (index === 0) list.append(standbyRow(name));
   });
   byId("searchProviders").value = chain.join(", ");
   renderCustoms();
