@@ -10,7 +10,7 @@ WhaleLife 交流 QQ 群：**962935021**
 
 ## 使用
 
-- 给她一个问题或话题：`search_web` 返回候选链接，模型可按任务选择 `search_read` 阅读原页。搜索来源可配成有序列表顺序回退，默认 `anysearch → duckduckgo → bing`，三条都不需要 API Key（AnySearch 未配 Key 时走它的匿名额度）；验证页、限流、网络不可达或页面结构变化都会明确失败，不自动改用付费服务。
+- 给她一个问题或话题：`search_web` 返回候选链接，模型可按任务选择 `search_read` 阅读原页。搜索来源可配成有序列表顺序回退，默认 `anysearch → duckduckgo`，两条都不需要 API Key（AnySearch 未配 Key 时走它的匿名额度）；验证页、限流、网络不可达或页面结构变化都会明确失败，不自动改用付费服务。
 - 直接给链接：`search_read` 读取公开 HTML / XHTML / 纯文字，返回来源地址、正文、链接和图片索引。搜索失败不影响读链接。正文每次最多 6000 个 UTF-16 单元，模型按 `pageRef` / `nextOffset` 继续读取；超过单页正文上限时标记 `truncated`。
 - 按需看图：开启可选视觉插件后，`search_image(pageRef,imageIndex)` 获取原图并交入当前可信会话，随后由 `vision_view(mediaRef)` 交给当前主模型。图片说明不是已看图，`offered` 也不代表已理解。不会自动收藏图片。视觉不可用只关闭取图接入，文字功能保留。
 - 按需收藏：开启可选图库后，AI 决定保留网页图片时调用 `search_collect(pageRef,imageIndex)`，从同一图片索引获取原图并经 `gallery.offerMedia` 取得图库引用，再调用现有 `gallery_collect({mediaRef,...})` 收藏。视觉引用与图库引用不能混用；准备引用不等于已收藏，不产生描述或向量。真正收藏仍遵守图库工具权限，是否完成以 `state:saved` 和后续任务结果为准。此功能不要求启用视觉；普通阅读和看图不向图库交入图片。
@@ -60,11 +60,11 @@ API Key 与带凭据代理仅在本插件后端配置中保存，设置页只显
 
 ## 搜索方式：顺序回退与聚合并发
 
-`searchMode` 两档，默认 `fallback`。
+`searchMode` 两档，默认 `aggregate`。
 
-**fallback（默认）**：来源链一条有序的链，前一家失败才换下一家，拿到第一条非空结果就停。一次只付一份开销，结果只来自一家，顺序不用想。
+**fallback**：来源链一条有序的链，前一家失败才换下一家，拿到第一条非空结果就停。一次只付一份开销，结果只来自一家，顺序不用想。
 
-**aggregate**：链上所有来源同时发请求，各自成段原样列出。
+**aggregate（默认）**：链上所有来源同时发请求，各自成段原样列出。
 
 - 回执里 `mode: "aggregate"`，条目在 `groups[]` 里，每段带 `provider` / `sourceKind` / `elapsedMs` / `results`
 - **顶层 `results` 为空**。同一批内容如果既在 `groups` 又在 `results` 里出现，等于花两倍 token 读一遍

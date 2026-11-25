@@ -8,7 +8,7 @@ import { isScholarSource } from './scholar.ts';
 import { isFactSource } from './facts.ts';
 export const MAX_PROVIDERS = 6;
 export const defaults: SurfConfig = {
-  searchProviders: ['bing'], searchMode: 'fallback', braveApiKey: '', tavilyApiKey: '', exaApiKey: '', anysearchApiKey: '', anysearchZone: 'cn',
+  searchProviders: ['anysearch'], searchMode: 'aggregate', braveApiKey: '', tavilyApiKey: '', exaApiKey: '', anysearchApiKey: '', anysearchZone: 'cn',
   proxyUrl: '', timeoutMs: 20_000, sourceTimeouts: {},
   maxPageBytes: 2 * 1024 * 1024, maxImageBytes: 8 * 1024 * 1024,
   maxTextChars: 60_000, resultsLimit: 5, structuredRead: true, resultsMaxChars: 8000, referenceTtlSeconds: 600, concurrency: 3, cacheSeconds: 300, sourceFailThreshold: 2, sourceCooldownSeconds: 60,
@@ -33,7 +33,7 @@ const secrets = [
   ['proxyUrl', 'clearProxy', 2048],
 ] as const;
 function isBuiltinProvider(value: unknown): value is Exclude<SearchProvider, `custom:${string}`> {
-  return value === 'bing' || value === 'duckduckgo' || value === 'brave' || value === 'anysearch'
+  return value === 'duckduckgo' || value === 'brave' || value === 'anysearch'
     || value === 'tavily' || value === 'exa' || value === 'github' || value === 'huggingface';
 }
 function isProvider(value: unknown, customs: CustomSource[]): value is SearchProvider {

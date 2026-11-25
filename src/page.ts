@@ -123,7 +123,7 @@ export const settingsPage = `<!doctype html>
 <div class="panel-body"><form id="f">
 
 <section class="pg-group" id="pg-source">
-<p class="pg-desc">按顺序尝试搜索来源：前一个失败才换下一个。第一个来源拿剩余预算的七成，其余按数量均分——最可能成的那个不至于被掐得太早。</p>
+<p class="pg-desc">搜索来源是一条链，两种用法：聚合（默认）是链上几家同时打、各自成段列出、只标重复；顺序回退是按链一家家试、前一家失败才换下一家。回退时第一个来源拿剩余预算的七成，其余按数量均分。</p>
 <div class="pg-pair">
 <div class="pg-item"><span class="pg-label">搜索来源（有序，可拖动排序）</span>
 <ul id="chain" class="chain"></ul>
@@ -133,7 +133,6 @@ export const settingsPage = `<!doctype html>
   <div class="preset-group"><span class="preset-title">无需 Key</span>
     <div class="preset" role="button" tabindex="0" data-provider="anysearch" data-needkey="0"><b>anysearch</b><span>聚合搜索，不带 Key 走匿名额度；分 cn / intl 两区，垂直频道只有它支持</span><em>点一下加进来</em><i class="more" title="设置" role="button" tabindex="0">⋯</i></div>
     <div class="preset" role="button" tabindex="0" data-provider="duckduckgo" data-needkey="0"><b>duckduckgo</b><span>解析结果页 HTML，不需要 Key；对方改版就可能失效</span><em>点一下加进来</em><i class="more" title="设置" role="button" tabindex="0">⋯</i></div>
-    <div class="preset" role="button" tabindex="0" data-provider="bing" data-needkey="0"><b>bing</b><span>cn.bing.com 结果页解析，国内可达性好</span><em>点一下加进来</em><i class="more" title="设置" role="button" tabindex="0">⋯</i></div>
     <div class="preset" role="button" tabindex="0" data-provider="github" data-needkey="0"><b>github</b><span>官方仓库搜索接口，不需要 Key；未登录每小时 60 次，超了会明说被限流</span><em>点一下加进来</em><i class="more" title="设置" role="button" tabindex="0">⋯</i></div>
     <div class="preset" role="button" tabindex="0" data-provider="huggingface" data-needkey="0"><b>huggingface</b><span>模型库搜索，返回 id、任务类型、下载量；不需要 Key</span><em>点一下加进来</em><i class="more" title="设置" role="button" tabindex="0">⋯</i></div>
   </div>
@@ -199,9 +198,9 @@ export const settingsPage = `<!doctype html>
 </div>
 <div class="pg-pair">
 <div class="pg-item"><span class="pg-label">垂直搜索试一下</span>
-<div class="chain-add"><select id="tagSel" class="chain-sel"><option value="">（自定义 tag）</option><option value="finance.quote">finance.quote</option><option value="security.vuln">security.vuln</option></select><input type="text" id="tagInput" class="chain-sel" placeholder="tag"><input type="text" id="paramsInput" class="chain-sel" style="min-width:240px" placeholder="params JSON">
+<div class="chain-add"><select id="tagSel" class="chain-sel" title="带 * 的必须配 params"><option value="">（自定义 tag）</option><optgroup label="academic · 学术"><option value="academic.citation">academic.citation *</option><option value="academic.dataset">academic.dataset</option><option value="academic.paper">academic.paper</option><option value="academic.person">academic.person</option></optgroup><optgroup label="finance · 金融"><option value="finance.calendar">finance.calendar *</option><option value="finance.fundamental">finance.fundamental *</option><option value="finance.macro">finance.macro *</option><option value="finance.news">finance.news *</option><option value="finance.quote">finance.quote *</option><option value="finance.screen">finance.screen *</option></optgroup><optgroup label="security · 安全"><option value="security.intel">security.intel *</option><option value="security.noise">security.noise *</option><option value="security.scan">security.scan *</option><option value="security.vuln">security.vuln *</option></optgroup><optgroup label="legal · 法律"><option value="legal.enforcement">legal.enforcement</option><option value="legal.judicial">legal.judicial</option><option value="legal.legislation">legal.legislation</option></optgroup><optgroup label="code · 代码"><option value="code.doc">code.doc *</option><option value="code.snippet">code.snippet</option></optgroup><optgroup label="travel · 出行"><option value="travel.flight">travel.flight *</option><option value="travel.flight_status">travel.flight_status *</option></optgroup><optgroup label="business · 商业"><option value="business.company">business.company</option><option value="business.jobs">business.jobs</option><option value="business.people">business.people</option><option value="business.trade">business.trade</option></optgroup></select><input type="text" id="tagInput" class="chain-sel" placeholder="tag"><input type="text" id="paramsInput" class="chain-sel" style="min-width:240px" placeholder="params JSON">
 <input type="text" id="vQuery" class="chain-sel" placeholder="查询词，留空用 whalelife"><button type="button" class="btn" id="probeVertical">试一下</button><span class="chain-msg" id="vMsg"></span></div>
-<p class="pg-hint">实测可用：finance.quote 配 {"type":"stock"}；security.vuln 配 {"type":"cve","value":"CVE-2024-3094"}。裸 tag（如 academic.search）会被来源拒绝，报错里会带回它的原话。这一栏只发一次真请求，不改任何配置。</p></div>
+<p class="pg-hint">下拉里是按域分好组的 25 个真实 tag，带 <b>*</b> 的必须配 params，选完会自动补一份骨架（值是空的，要自己填）。裸 tag 会被来源拒绝，报错里会带回它的原话。这一栏只发一次真请求，不改任何配置。</p></div>
 </div>
 </section>
 
@@ -884,11 +883,15 @@ async function probe(body, msgEl) {
     msgEl.textContent = "\u8bf7\u6c42\u5931\u8d25\uff1a" + (error && error.message ? error.message : error);
   }
 }
+const TAG_REQ = {"academic.citation":["id"],"finance.calendar":["type"],"finance.fundamental":["symbol","type"],"finance.macro":["type"],"finance.news":["type"],"finance.quote":["type"],"finance.screen":["type"],"security.intel":["ioc"],"security.noise":["ip"],"security.scan":["ioc"],"security.vuln":["type","value"],"code.doc":["library"],"travel.flight":["departure","arrival","date"],"travel.flight_status":["flight_number","departure"]};
 byId("tagSel").onchange = () => {
   const tag = byId("tagSel").value;
   if (!tag) return;
   byId("tagInput").value = tag;
-  byId("paramsInput").value = tag === "finance.quote" ? '{"type":"stock"}' : '{"type":"cve","value":"CVE-2024-3094"}';
+  const req = TAG_REQ[tag] || [];
+  const skel = {};
+  for (const k of req) skel[k] = "";
+  byId("paramsInput").value = req.length ? JSON.stringify(skel) : "";
 };
 byId("probeVertical").onclick = () => {
   const tag = byId("tagInput").value.trim();
