@@ -12,6 +12,7 @@ import { buildCustomRequest, parseCustom, guessJsonShape } from './custom.ts';
 import type { JsonShapeGuess } from './custom.ts';
 import { buildRequest, parseScholar, isScholarSource } from './scholar.ts';
 import { buildFactRequest, parseFact, isFactSource } from './facts.ts';
+import { detectStructured, fetchStructured } from './structured.ts';
 import type { PublicFetcher, SurfConfig, SurfService, SurfStatus, OperationResult, ParsedPage,
   SearchData, SearchFailure, SearchItem, SearchProvider, SearchZone, PageData, ImageData, GalleryImageData, SearchInput, ReadInput, ImageInput, CallOptions, VisionService, GalleryService,
   ScholarData, ScholarInput, ScholarItem,
@@ -647,6 +648,28 @@ export class SurfRuntime implements SurfService {
     }
     return parseAnySearch(response.body, limit);
   }
+  /** 命中 GitHub / Stack Exchange / arXiv / 维基百科就先打公开 API；没成回落页面抓取，原因写进回执。 */
+  private async readPage(url: string, signal: AbortSignal): Promise<{ page: ParsedPage; url: string }> {
+    const target = this.config.structuredRead ? detectStructured(url) : undefined;
+    if (!target) return this.fetchHtmlPage(url, signal);
+    try {
+      const page = await fetchStructured(this.fetcher, target, url, { timeoutMs: this.config.timeoutMs,
+        maxBytes: this.config.maxPageBytes, maxTextChars: this.config.maxTextChars, proxyUrl: this.config.proxyUrl, signal });
+      return { page, url };
+    } catch (error) {
+      if (signal.aborted) throw new SurfError('cancelled');
+      const reason = error instanceof SurfError ? error.code : 'unexpected_error';
+      const fallback = await this.fetchHtmlPage(url, signal);
+      const note = `结构化读取（${target.label}）没成，回落到页面抓取：${reason}。`;
+      return { page: { ...fallback.page, notice: fallback.page.notice ? `${note} ${fallback.page.notice}` : note }, url: fallback.url };
+    }
+  }
+  private async fetchHtmlPage(url: string, signal: AbortSignal): Promise<{ page: ParsedPage; url: string }> {
+    const response = await this.fetcher.get(url, { signal, timeoutMs: this.config.timeoutMs,
+      maxBytes: this.config.maxPageBytes, proxyUrl: this.config.proxyUrl, headers: { Accept: 'text/html,application/xhtml+xml,text/plain' } });
+    checkResponse(response.status);
+    return { page: parsePage(response.body, response.url, response.headers['content-type'] ?? '', this.config.maxTextChars), url: response.url };
+  }
   read(input: ReadInput & { sessionId: string }, options?: CallOptions): Promise<OperationResult<PageData>> {
     return this.execute(input?.sessionId, options, async (session, signal) => {
       object(input);
@@ -658,16 +681,14 @@ export class SurfRuntime implements SurfService {
       } else {
         if (typeof input.url !== 'string' || !input.url || offset !== 0) throw new SurfError('invalid_input');
         if (this.pages.size >= 32 || [...this.pages.values()].filter(p => p.sessionId === session).length >= 8) throw new SurfError('busy');
-        const response = await this.fetcher.get(input.url, { signal, timeoutMs: this.config.timeoutMs,
-          maxBytes: this.config.maxPageBytes, proxyUrl: this.config.proxyUrl, headers: { Accept: 'text/html,application/xhtml+xml,text/plain' } });
-        checkResponse(response.status);
-        const parsed = parsePage(response.body, response.url, response.headers['content-type'] ?? '', this.config.maxTextChars);
+        const fetched = await this.readPage(input.url, signal);
+        const parsed = fetched.page;
         if (signal.aborted) throw new SurfError('cancelled');
         // Recheck after I/O: parallel callers must not exceed the cache capacity.
         this.prune();
         if (this.pages.size >= 32 || [...this.pages.values()].filter(p => p.sessionId === session).length >= 8) throw new SurfError('busy');
         ref = `page_${randomUUID()}`;
-        page = { ...parsed, sessionId: session, url: response.url, expires: this.now() + this.config.referenceTtlSeconds * 1000 };
+        page = { ...parsed, sessionId: session, url: fetched.url, expires: this.now() + this.config.referenceTtlSeconds * 1000 };
         this.pages.set(ref, page);
       }
       if (offset > page.text.length) throw new SurfError('invalid_input');

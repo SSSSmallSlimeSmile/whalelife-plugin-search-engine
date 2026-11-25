@@ -42,6 +42,7 @@ WhaleLife 交流 QQ 群：**962935021**
 | 连续失败阈值 | 2 次 | 1–10 次；成功一次清零，见「来源冷却」 |
 | 冷却时长 | 60 秒 | 0–600 秒；0 = 不冷却 |
 | 结果总量上限 | 8000 字符 | 0–40000，按序列化长度算；0 = 不限，见下节 |
+| 结构化读取 | 开 | 命中 GitHub / Stack Exchange / arXiv / 维基百科时改走公开 API，失败回落页面抓取，见下节 |
 
 API Key 与带凭据代理仅在本插件后端配置中保存，设置页只显示是否已配置。留空保留，明确勾选才清除；并发保存采用随机 revision 冲突检测。没有填写 Key 不影响默认搜索。首版不自动部署 SearXNG 等搜索服务器，也不安装或接管用户浏览器。
 
@@ -148,6 +149,26 @@ Crossref 和 OpenAlex 支持 `mailto`（设置页「联系邮箱」），填了�
 需要 Key 的预设卡片（brave / tavily / exa）点一下会滚到下面那一栏的 Key 输入框，填完保存卡片就亮。
 
 未验证：真浏览器里拖动排序、卡片高亮、探完自动回填这几步的观感；只验到接口和页面 HTML。
+
+## 结构化读取
+
+`search_read` 碰到这几类地址时不再解析页面壳，改打它们的公开 API：
+
+| 地址 | 走哪条接口 | 拿到什么 |
+| --- | --- | --- |
+| `github.com/{owner}/{repo}/issues/{n}`、`/pull/{n}` | `api.github.com/repos/{owner}/{repo}/issues/{n}` | 标题、状态、标签、作者、正文（Markdown 原文）、前 30 条评论 |
+| `github.com/{owner}/{repo}/releases/tag/{tag}` | 同一个库的 `/releases/tags/{tag}` | 版本名、发布说明、预发布标记 |
+| `stackoverflow.com`、`superuser.com`、`*.stackexchange.com` 的 `/questions/{n}` | `api.stackexchange.com/2.3/questions/{n}` | 票数、浏览、提问者、正文；回答按票数排序，已采纳的排最前 |
+| `arxiv.org/abs/{id}`（`/pdf/{id}` 也行） | `export.arxiv.org/api/query?id_list=` | 作者、提交日期、备注、摘要 |
+| `xx.wikipedia.org/wiki/{标题}` | `/w/api.php?action=query&prop=extracts` | 纯文本正文 |
+
+都不需要 Key。好处是干净：GitHub issue 不再混进导航栏和评论区的壳，Stack Exchange 的回答按票数而不是页面默认顺序，维基条目不用跟脚注和图片说明挤在一起。
+
+**失败一律回落**：接口报错、条目不存在、返回结构对不上，都会退回普通页面抓取，回执的 `notice` 里写明原因（例如「结构化读取（GitHub issue）没成，回落到页面抓取：http_error。」），不静默换路径。
+
+**两处外部脾气**：Stack Exchange 的部分问题详情会被换成不带正文的版本（答案通常还在），回执里会直说；GitHub 不带 Key 每小时 60 次，超了报 403 并回落成页面抓取。
+
+设置页「读取」里可以整个关掉（`structuredRead`），关掉就只走页面抓取。
 
 ## 内容与能力边界
 

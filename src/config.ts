@@ -11,7 +11,7 @@ export const defaults: SurfConfig = {
   searchProviders: ['bing'], braveApiKey: '', tavilyApiKey: '', exaApiKey: '', anysearchApiKey: '', anysearchZone: 'cn',
   proxyUrl: '', timeoutMs: 20_000, sourceTimeouts: {},
   maxPageBytes: 2 * 1024 * 1024, maxImageBytes: 8 * 1024 * 1024,
-  maxTextChars: 60_000, resultsLimit: 5, resultsMaxChars: 8000, referenceTtlSeconds: 600, concurrency: 3, cacheSeconds: 300, sourceFailThreshold: 2, sourceCooldownSeconds: 60,
+  maxTextChars: 60_000, resultsLimit: 5, structuredRead: true, resultsMaxChars: 8000, referenceTtlSeconds: 600, concurrency: 3, cacheSeconds: 300, sourceFailThreshold: 2, sourceCooldownSeconds: 60,
   scholarEnabled: false, scholarSources: ['arxiv', 'openalex', 'crossref'], scholarMailto: '',
   factsEnabled: false, factsSources: ['wikipedia', 'wikidata', 'openlibrary', 'oeis'], factsLang: 'zh',
   customSources: [],
@@ -124,6 +124,10 @@ export function parseConfig(value: unknown): SurfConfig {
       const value = input[key], [low, high] = limits[key];
       if (typeof value !== 'number' || !Number.isInteger(value) || value < low || value > high) throw new SurfError('config_invalid');
       result[key] = value;
+    }
+    if (input.structuredRead !== undefined) {
+      if (typeof input.structuredRead !== 'boolean') throw new SurfError('config_invalid');
+      result.structuredRead = input.structuredRead;
     }
     if (input.scholarEnabled !== undefined) {
       if (typeof input.scholarEnabled !== 'boolean') throw new SurfError('config_invalid');

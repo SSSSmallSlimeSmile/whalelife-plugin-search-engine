@@ -229,6 +229,10 @@ export const settingsPage = `<!doctype html>
 <div class="pg-item"><label class="pg-row"><span class="pg-label">页面引用有效期（秒）</span><input type="number" name="referenceTtlSeconds" id="referenceTtlSeconds" min="30" max="1800" required></label>
 <p class="pg-hint">pageRef 只对创建它的会话有效，重载插件后失效。</p></div>
 </div>
+
+<div class="pg-item"><span class="pg-label">结构化读取</span>
+<span class="pg-check"><input id="structuredRead" type="checkbox" name="structuredRead"><span class="pg-label">命中 GitHub / Stack Exchange / arXiv / 维基百科时改走公开 API</span></span>
+<p class="pg-hint">取的是结构化字段，不是页面快照：GitHub 的 issue / PR / release 会拆出状态、标签、正文和评论；Stack Exchange 的回答按票数排、已采纳的排在前面；arXiv 取元数据与摘要；维基百科取纯文本正文。这几个接口都不需要 Key。解析没成会回落成普通抓取，回执里写明原因。</p></div>
 </section>
 
 <section class="pg-group" id="pg-scholar" hidden>
@@ -788,6 +792,7 @@ function show(data) {
   timeouts = { ...(c.sourceTimeouts || {}) };
   renderChain();
   for (const id of ["resultsLimit", "resultsMaxChars", "concurrency", "maxTextChars", "referenceTtlSeconds", "cacheSeconds", "sourceFailThreshold", "sourceCooldownSeconds"]) byId(id).value = c[id];
+  byId("structuredRead").checked = c.structuredRead === true;
   byId("anysearchZone").value = c.anysearchZone;
   byId("timeoutSeconds").value = c.timeoutMs / 1000;
   byId("pageKiB").value = c.maxPageBytes / 1024;
@@ -954,6 +959,7 @@ byId("f").onsubmit = async (event) => {
   for (const id of ["clearBraveApiKey", "clearAnySearchApiKey", "clearTavilyApiKey", "clearExaApiKey", "clearProxy"]) config[id] = byId(id).checked;
   config.customSources = customs.map(item => ({ name: item.name, url: item.url, method: item.method,
     items: item.items, title: item.title, link: item.link, snippet: item.snippet || "", key: item.key || "" }));
+  config.structuredRead = byId("structuredRead").checked;
   config.scholarEnabled = byId("scholarEnabled").checked;
   config.scholarMailto = byId("scholarMailto").value.trim();
   config.scholarSources = [...document.querySelectorAll(".scholar-src")].filter(box => box.checked).map(box => box.value);

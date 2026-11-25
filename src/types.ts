@@ -41,6 +41,8 @@ export interface SurfConfig {
   maxPageBytes: number;
   maxImageBytes: number;
   maxTextChars: number;
+  /** 命中 GitHub / Stack Exchange / arXiv / 维基百科时改走公开 API 取结构化字段，失败回落页面抓取。 */
+  structuredRead: boolean;
   resultsLimit: number;
   /** 单次网页搜索结果的总字符上限（按序列化长度算），0 = 不限。摘要一千字一条，十条就是一万字进上下文。 */
   resultsMaxChars: number;
