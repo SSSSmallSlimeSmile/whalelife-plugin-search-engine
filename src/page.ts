@@ -44,9 +44,9 @@ export const settingsPage = `<!doctype html>
 .chain-zone>.tier-note{display:block;font-size:12px;color:#9aa0b0;margin-top:4px;font-style:normal}
 .chain-zone.empty>.tier-note{margin:0}
 .chain-row .chain-weight{justify-self:end;font-size:12px;padding:2px 2px;max-width:74px}
-.chain-standby{grid-column:1/-1;display:flex;align-items:center;gap:4px;flex-wrap:nowrap;margin:4px 0 0;padding:1px 6px;border:1px dashed rgba(124,92,255,.45);border-radius:9px;background:rgba(124,92,255,.03);font-size:12px;color:#797e8c}
-.chain-standby select{font-size:12px;padding:0 3px;max-width:96px;min-width:0;flex:0 1 auto;line-height:18px}
-.chain-standby em{font-style:normal;color:#9aa0b0}
+.chain-standby-pick{font-size:11px;padding:1px 3px;width:44px;max-width:92px;min-width:0;border:1px solid rgba(124,92,255,.45);border-radius:6px;background:rgba(124,92,255,.08);color:#6d4aff;font-family:inherit;cursor:pointer;line-height:16px}
+.chain-standby-pick.unset{color:#9aa0b0;border-color:rgba(127,127,127,.3);background:transparent}
+.chain-standby-pick:not(.unset){width:auto}
 .chain-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:6px 8px;padding:8px 10px;border:1px solid rgba(124,92,255,.45);border-radius:9px;background:rgba(124,92,255,.06);box-shadow:0 0 0 1px rgba(124,92,255,.18),0 2px 10px rgba(124,92,255,.14),0 0 16px rgba(124,92,255,.10);font-size:13px;cursor:grab}
 .chain-row:hover{box-shadow:0 0 0 1px rgba(124,92,255,.55),0 3px 14px rgba(124,92,255,.24),0 0 22px rgba(124,92,255,.20)}
 .chain-row.drag{opacity:.45}
@@ -58,6 +58,8 @@ export const settingsPage = `<!doctype html>
 .chain-btns button{background:transparent;border:1px solid rgba(127,127,127,.3);color:inherit;border-radius:6px;padding:2px 7px;font-size:11px;cursor:pointer;font-family:inherit}
 .chain-btns button:hover{border-color:#7c5cff;color:#6d4aff}
 .chain-btns button:disabled{opacity:.4;cursor:default}
+.chain-btns button.danger{border-color:rgba(185,28,28,.28);color:#b91c1c}
+.chain-btns button.danger:hover{border-color:#b91c1c;color:#b91c1c;background:rgba(185,28,28,.06)}
 .chain-add{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px}
 .presets{display:flex;flex-direction:column;gap:10px;margin-top:12px}
 .preset-group{display:grid;grid-template-columns:repeat(auto-fill,minmax(228px,1fr));gap:8px}
@@ -437,29 +439,26 @@ function standbyChoices(name) {
   const all = STANDBY_OPTIONS.concat(customs.map(item => "custom:" + item.name));
   return all.filter(item => item !== name && !used.has(item));
 }
-/** 首位下面那条虚线：给主位配一个二级来源。 */
-function standbyRow(name) {
-  const li = document.createElement("div");
-  li.className = "chain-standby";
-  const text = document.createElement("span");
-  text.textContent = "回退";
+/** 主位那颗小标记：点开选一个回退来源。没设时显示 \u21ba，设了显示来源名。 */
+function standbyPick(name) {
   const sel = document.createElement("select");
-  sel.id = "chainStandby";
+  sel.className = "chain-standby-pick";
+  sel.draggable = false;
+  sel.title = "主位没拿到结果时，换这个来源再打一次（选「\u21ba」就是不换）";
   const opts = standbyChoices(name);
-  sel.innerHTML = '<option value="">不设</option>'
+  sel.innerHTML = '<option value="">\u21ba</option>'
     + opts.map(item => '<option value="' + item + '">' + item + '</option>').join("");
   const saved = fallbacks[name] || "";
   sel.value = opts.includes(saved) ? saved : "";
-  const hint = document.createElement("em");
-  hint.textContent = opts.length ? "" : "链上都在并发，没得选";
+  sel.classList.toggle("unset", !sel.value);
   sel.addEventListener("change", () => {
     if (sel.value) fallbacks[name] = sel.value;
     else delete fallbacks[name];
-    hint.textContent = "已记下";
+    sel.classList.toggle("unset", !sel.value);
+    sel.title = sel.value ? "主位没拿到结果时改用 " + sel.value + "（已记下，点保存生效）"
+                          : "主位没拿到结果时，换一个来源再打一次（不设就不换）";
   });
-  li.append(text, sel, hint);
-  li.title = "主位没拿到结果时，换这个来源再打一次";
-  return li;
+  return sel;
 }
 let tiers = {};
 let weights = {};
@@ -496,8 +495,9 @@ function renderRow(name, index) {
   weight.value = String(weightOf(name));
   weight.addEventListener("change", () => { weights[name] = Number(weight.value); });
   const btns = document.createElement("span"); btns.className = "chain-btns";
-  const mk = (text, act, disabled) => { const b = document.createElement("button"); b.type = "button"; b.textContent = text; b.dataset.act = act; b.dataset.name = name; b.disabled = Boolean(disabled); return b; };
-  btns.append(mk("\u5220\u9664", "del", chain.length <= 1), mk("\u8bd5\u4e00\u4e0b", "probe", false));
+  const mk = (text, act, disabled, cls) => { const b = document.createElement("button"); b.type = "button"; b.textContent = text; b.dataset.act = act; b.dataset.name = name; b.disabled = Boolean(disabled); if (cls) b.className = cls; return b; };
+  btns.append(mk("\u5220\u9664", "del", chain.length <= 1, "danger"), mk("\u8bd5\u4e00\u4e0b", "probe", false));
+  if (tier === 1 && list[0] === name) btns.append(standbyPick(name));
   const msg = document.createElement("span"); msg.className = "chain-msg"; btns.append(msg);
   row.append(grip, label, weight, order, btns);
   return row;
@@ -509,7 +509,6 @@ function renderChain() {
   const first = groupsOf(1)[0];
   chain.forEach((name, index) => {
     const row = renderRow(name, index);
-    if (name === first) row.append(standbyRow(name));
     (tierOf(name) === 2 ? two : one).append(row);
   });
   const g1 = groupsOf(1).length, g2 = groupsOf(2).length;
@@ -550,7 +549,7 @@ TIER_BOX.addEventListener("click", (event) => {
 TIER_BOX.addEventListener("dragstart", (event) => {
   const row = event.target.closest(".chain-row");
   if (!row) return;
-  if (event.target.closest(".chain-standby")) { event.preventDefault(); return; }
+  if (event.target.closest(".chain-standby-pick")) { event.preventDefault(); return; }
   event.dataTransfer.setData("text/plain", row.dataset.name);
   event.dataTransfer.effectAllowed = "move";
   row.classList.add("drag");
@@ -569,7 +568,7 @@ TIER_BOX.addEventListener("dragover", (event) => {
 TIER_BOX.addEventListener("drop", (event) => {
   const zone = event.target.closest(".chain-zone");
   if (!zone) return;
-  if (event.target.closest(".chain-standby")) return;
+  if (event.target.closest(".chain-standby-pick")) return;
   event.preventDefault();
   const name = event.dataTransfer.getData("text/plain");
   const row = event.target.closest(".chain-row");
