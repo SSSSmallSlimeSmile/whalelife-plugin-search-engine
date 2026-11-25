@@ -284,6 +284,7 @@ export class SurfRuntime implements SurfService {
     for (const [key, offer] of this.offers) if (offer.expires <= this.now() || offer.binding.signal.aborted) this.offers.delete(key);
     for (const [key, offer] of this.collectionOffers) if (offer.expires <= this.now() || offer.binding.signal.aborted) this.collectionOffers.delete(key);
     for (const [key, hit] of this.cache) if (hit.expires <= this.now()) this.cache.delete(key);
+    for (const [id, set] of this.sets) if (set.expires <= this.now()) this.sets.delete(id);
   }
   private async releaseOffer(binding: OptionalService<VisionService>, sessionId: string, mediaRef: string) {
     if (binding.signal.aborted) return;
@@ -332,6 +333,11 @@ export class SurfRuntime implements SurfService {
   }
   /** 来源健康度：连续失败到阈值就进冷却，免得每次都拿预算去撞同一堵墙。 */
   private health = new Map<string, { fails: number; until: number; lastCode: string }>();
+  /**
+   * 结果集：把裁之前的那份完整结果留着，翻页就从这里取。
+   * 按会话隔离——别的会话拿着 setId 也取不到。
+   */
+  private sets = new Map<string, { sessionId: string; expires: number; groups: AggregateGroup[]; served: string[] }>();
   private coolingLeft(name: string): number {
     const item = this.health.get(name);
     if (!item || item.until <= this.now()) return 0;
@@ -355,6 +361,44 @@ export class SurfRuntime implements SurfService {
     // 没有单独设过：首个来源最可能成，给剩余预算的 70%；其后的按剩余来源数均分。
     return count === 1 ? Math.floor(remaining)
       : Math.max(1, Math.floor(index === 0 ? remaining * 0.7 : remaining / (count - index)));
+  }
+  /** 把结果集按组序摊平，同一 URL 只留第一次出现的位置。翻页就按这个顺序往后走。 */
+  private flatten(groups: AggregateGroup[]): SearchItem[] {
+    const seen = new Set<string>(); const out: SearchItem[] = [];
+    for (const group of groups) for (const item of group.results) {
+      const key = item.url.trim().replace(/#.*$/, '');
+      if (seen.has(key)) continue;
+      seen.add(key); out.push(item);
+    }
+    return out;
+  }
+  /** 存一份完整结果集。过期时间跟页面引用一致，过了再翻页就报 page_unavailable。 */
+  private saveSet(session: string, groups: AggregateGroup[]): { id: string; total: number } {
+    const id = 'set_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-3);
+    while (this.sets.size >= 32) { const oldest = this.sets.keys().next(); if (oldest.done) break; this.sets.delete(oldest.value); }
+    const copy = JSON.parse(JSON.stringify(groups)) as AggregateGroup[];
+    this.sets.set(id, { sessionId: session, expires: this.now() + this.config.referenceTtlSeconds * 1000, groups: copy, served: [] });
+    return { id, total: this.flatten(copy).length };
+  }
+  /** 记下这一轮已经给出去了哪些，返回结果集里还有没有剩下的。 */
+  private markServed(id: string, items: SearchItem[]): boolean {
+    const entry = this.sets.get(id); if (!entry) return false;
+    for (const item of items) entry.served.push(item.url.trim().replace(/#.*$/, ''));
+    return this.flatten(entry.groups).some(item => !entry.served.includes(item.url.trim().replace(/#.*$/, '')));
+  }
+  /** 取下一批：跳过已经给过的 URL，不打网络。 */
+  private pageSet(session: string, id: string, limit: number): SearchData {
+    const entry = this.sets.get(id);
+    if (!entry || entry.sessionId !== session || entry.expires <= this.now()) throw new SurfError('page_unavailable');
+    const all = this.flatten(entry.groups);
+    const left = all.filter(item => !entry.served.includes(item.url.trim().replace(/#.*$/, '')));
+    const page = JSON.parse(JSON.stringify(left.slice(0, limit))) as SearchItem[];
+    for (const item of page) entry.served.push(item.url.trim().replace(/#.*$/, ''));
+    const hasMore = left.length > page.length;
+    return { provider: 'aggregate', mode: 'aggregate', results: page, untrusted: true, elapsedMs: 0,
+      setId: id, pageStart: entry.served.length - page.length, shown: page.length, available: all.length, hasMore,
+      notes: [hasMore ? '这一批是结果集里还没给过的下 ' + page.length + ' 条，还有更多；再传一次 more 继续。'
+        : '结果集已经给完了，没有更多条目。要新的就重新搜一次。'] };
   }
   private page(session: string, ref: unknown): StoredPage {
     const page = typeof ref === 'string' ? this.pages.get(ref) : undefined;
@@ -386,11 +430,13 @@ export class SurfRuntime implements SurfService {
       if (typeof input.query !== 'string' || !input.query.trim() || input.query.length > 600 || /[\x00-\x1f\x7f]/.test(input.query)) throw new SurfError('invalid_input');
       const limit = input.limit ?? config.resultsLimit;
       if (!Number.isInteger(limit) || limit < 1 || limit > 10) throw new SurfError('invalid_input');
+      // 翻页：给了 more 就不打网络，直接从上一轮存下的结果集里取还没给过的条目。
+      if (typeof input.more === 'string' && input.more.trim()) return this.pageSet(_session, input.more.trim(), limit);
       const providers = config.searchProviders;
       const vertical = verticalOf(input);
       // 聚合 / 混合：并发打全链，分段列出，不排序。见 searchAggregated。
       if (config.searchMode === 'aggregate' || config.searchMode === 'hybrid')
-        return this.searchAggregated(input.query.trim(), limit, vertical, signal, config, config.searchMode === 'hybrid');
+        return this.searchAggregated(input.query.trim(), limit, vertical, signal, config, config.searchMode === 'hybrid', _session);
       const cacheKey = this.cacheKey('search', [input.query.trim(), limit, providers, vertical]);
       const cached = this.cacheGet<SearchData>(cacheKey);
       if (cached) return { ...cached.data, cached: true, cachedAgoMs: cached.agoMs };
@@ -461,13 +507,16 @@ export class SurfRuntime implements SurfService {
    * 唯一做的是标重复：同一条 URL 被两家给出时，后来的那条带 dupOf，顶层给 overlap。
    * 条目都在 groups 里，顶层 results 留空，免得同一批内容在回执里出现两遍。
    */
-  private async searchAggregated(query: string, limit: number, vertical: ReturnType<typeof verticalOf>, signal: AbortSignal, config: SurfConfig, hybrid = false): Promise<SearchData> {
+  private async searchAggregated(query: string, limit: number, vertical: ReturnType<typeof verticalOf>, signal: AbortSignal, config: SurfConfig, hybrid = false, session = ''): Promise<SearchData> {
     const providers = config.searchProviders;
     const mode = hybrid ? 'hybrid' as const : 'aggregate' as const;
     const cacheKey = this.cacheKey('search-agg', [query, limit, providers, vertical, mode, config.aggregateConcurrency]);
     const cached = this.cacheGet<SearchData>(cacheKey);
     if (cached) return { ...cached.data, cached: true, cachedAgoMs: cached.agoMs };
     const notes: string[] = [];
+    // 翻页的池子取决于这一次向来源要多几条：一次请求里多要一些，条数不额外花钱，
+    // 但回执里只展示 limit 条，剩下的留在结果集等人来翻。
+    const fetchSize = Math.min(10, Math.max(limit, limit * 2));
     if (vertical.tag !== undefined || vertical.zone !== undefined || vertical.language !== undefined)
       notes.push('聚合模式下 tag/zone/language 只对 anysearch 生效，其它来源会忽略。');
     const started = performance.now();
@@ -478,7 +527,7 @@ export class SurfRuntime implements SurfService {
       const limitSignal = AbortSignal.timeout(Math.max(1, budgetMs));
       const attemptSignal = AbortSignal.any([signal, limitSignal]);
       try {
-        const results = await untilCancelled(attemptSignal, () => this.searchSource(name, query, limit, attemptSignal, budgetMs, vertical, config));
+        const results = await untilCancelled(attemptSignal, () => this.searchSource(name, query, fetchSize, attemptSignal, budgetMs, vertical, config));
         if (limitSignal.aborted) throw new SurfError('timeout');
         return { results, elapsedMs: Math.round(performance.now() - at) };
       } catch (error) {
@@ -563,6 +612,8 @@ export class SurfRuntime implements SurfService {
         if (owner !== group.provider && !item.dupOf) { item.dupOf = owner; overlap += 1; }
       }
     }
+    // 翻页用：裁之前先存一份完整的，之后传 more 就能取下一批。
+    const stored = this.saveSet(session, groups);
     // 条数预算是全局的：limit 是这一轮要几条，不是每家几条。先去重，再分名额。
     {
       const valid = groups.filter(group => group.results.length > 0);
@@ -601,8 +652,11 @@ export class SurfRuntime implements SurfService {
       }).join(' ');
       throw new SearchExhaustedError('search_exhausted', why);
     }
+    const shownItems = groups.flatMap(group => group.results);
+    const hasMore = this.markServed(stored.id, shownItems);
     const data: SearchData = { provider: 'aggregate', mode, groups, results: [], overlap: overlap, untrusted: true,
       elapsedMs: Math.round(performance.now() - started),
+      setId: stored.id, shown: shownItems.length, available: stored.total, hasMore,
       ...(notes.length ? { notes } : {}) };
     // 混合：链上顺序就是主次顺序。第一个给出结果的当主，前面的几家记下为什么没顶上。
     if (hybrid) {

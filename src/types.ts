@@ -123,6 +123,8 @@ export interface SearchItem {
 export interface CallOptions { signal?: AbortSignal }
 export interface SearchInput {
   query: string; limit?: number;
+  /** 翻页：传上一次回执里的 setId，从那份结果集里取下一批，不发网络请求。 */
+  more?: string;
   /** Vertical search tag (anysearch only, e.g. academic.search). */
   tag?: string;
   /** Region routing (anysearch only). */
@@ -233,6 +235,19 @@ export interface SearchData {
   sourceKind?: SourceKind;
   /** 因总量上限被丢掉的条目数；没丢就不出现这个字段。 */
   truncated?: number;
+  /**
+   * 这一轮结果集的编号。想往后翻页时把它传回 search_web 的 more：
+   * 翻页不发请求，直接从这份结果集里取还没给过的条目。
+   */
+  setId?: string;
+  /** 这次给了几条；配合 available 看得还剩多少。 */
+  shown?: number;
+  /** 结果集里一共有几条（跨来源去重后的）。 */
+  available?: number;
+  /** 结果集里还有没给出的条目。 */
+  hasMore?: boolean;
+  /** 翻页时：这一批从第几条开始（从 0 数）。 */
+  pageStart?: number;
   fallback?: SearchFailure[];
   /** Per-call notes: which sources ignored tag/zone/language, and why. */
   notes?: string[];
