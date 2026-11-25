@@ -14,7 +14,7 @@ import { buildRequest, parseScholar, isScholarSource } from './scholar.ts';
 import { buildFactRequest, parseFact, isFactSource } from './facts.ts';
 import { detectStructured, fetchStructured } from './structured.ts';
 import type { PublicFetcher, SurfConfig, SurfService, SurfStatus, OperationResult, ParsedPage,
-  SearchData, SearchFailure, SearchItem, SearchProvider, SearchZone, SourceKind, PageData, ImageData, GalleryImageData, SearchInput, ReadInput, ImageInput, CallOptions, VisionService, GalleryService,
+  SearchData, SearchFailure, SearchItem, AggregateGroup, SearchProvider, SearchZone, SourceKind, PageData, ImageData, GalleryImageData, SearchInput, ReadInput, ImageInput, CallOptions, VisionService, GalleryService,
   ScholarData, ScholarInput, ScholarItem,
   FactData, FactInput, FactFailure, FactItem } from './types.ts';
 
@@ -334,6 +334,8 @@ export class SurfRuntime implements SurfService {
       if (!Number.isInteger(limit) || limit < 1 || limit > 10) throw new SurfError('invalid_input');
       const providers = config.searchProviders;
       const vertical = verticalOf(input);
+      // 聚合模式：并发打全链，分段列出，不排序。见 searchAggregated。
+      if (config.searchMode === 'aggregate') return this.searchAggregated(input.query.trim(), limit, vertical, signal, config);
       const cacheKey = this.cacheKey('search', [input.query.trim(), limit, providers, vertical]);
       const cached = this.cacheGet<SearchData>(cacheKey);
       if (cached) return { ...cached.data, cached: true, cachedAgoMs: cached.agoMs };
@@ -392,6 +394,82 @@ export class SurfRuntime implements SurfService {
       throw new SearchExhaustedError(answered && answeredCode ? answeredCode : providers.length === 1 ? lastCode : 'search_exhausted',
         fallback.map(item => item.provider + ' (' + item.elapsedMs + ' ms): ' + item.reason).join(' '));
     });
+  }
+  /**
+   * 聚合：并发打链上所有来源，各自成段原样列出。
+   * 不排序、不合并——三家谁更相关我们判不了，按出现次数排出来的顺序只是看着像评测。
+   * 唯一做的是标重复：同一条 URL 被两家给出时，后来的那条带 dupOf，顶层给 overlap。
+   * 条目都在 groups 里，顶层 results 留空，免得同一批内容在回执里出现两遍。
+   */
+  private async searchAggregated(query: string, limit: number, vertical: ReturnType<typeof verticalOf>, signal: AbortSignal, config: SurfConfig): Promise<SearchData> {
+    const providers = config.searchProviders;
+    const cacheKey = this.cacheKey('search-agg', [query, limit, providers, vertical]);
+    const cached = this.cacheGet<SearchData>(cacheKey);
+    if (cached) return { ...cached.data, cached: true, cachedAgoMs: cached.agoMs };
+    const notes: string[] = [];
+    if (vertical.tag !== undefined || vertical.zone !== undefined || vertical.language !== undefined)
+      notes.push('聚合模式下 tag/zone/language 只对 anysearch 生效，其它来源会忽略。');
+    const started = performance.now();
+    const forceAll = providers.every(name => this.coolingLeft(name) > 0);
+    const runs = providers.map(async (provider): Promise<AggregateGroup> => {
+      const cooling = forceAll ? 0 : this.coolingLeft(provider);
+      if (cooling > 0) return { provider, elapsedMs: 0, results: [], skipped: '上次连续失败，冷却中，还剩 ' + cooling + ' 秒' };
+      const at = performance.now();
+      const timeoutMs = Math.min(config.sourceTimeouts[provider] ?? config.timeoutMs, config.timeoutMs);
+      const limitSignal = AbortSignal.timeout(Math.max(1, timeoutMs));
+      const attemptSignal = AbortSignal.any([signal, limitSignal]);
+      try {
+        const results = await untilCancelled(attemptSignal, () => this.searchSource(provider, query, limit, attemptSignal, timeoutMs, vertical, config));
+        if (limitSignal.aborted) throw new SurfError('timeout');
+        this.noteSourceSuccess(provider);
+        const trimmed = trimResults(annotate(results, provider), config.resultsMaxChars);
+        return { provider, sourceKind: kindOf(provider), elapsedMs: Math.round(performance.now() - at), results: trimmed.results,
+          ...(trimmed.truncated ? { truncated: trimmed.truncated } : {}) };
+      } catch (error) {
+        if (signal.aborted) throw new SurfError('cancelled');
+        const failure = safeError(limitSignal.aborted || performance.now() - at >= timeoutMs ? new SurfError('timeout') : error);
+        this.noteSourceFailure(config, provider, failure.code);
+        return { provider, elapsedMs: Math.round(performance.now() - at), results: [], error: { code: failure.code, reason: failure.message } };
+      }
+    });
+    const groups = await Promise.all(runs);
+    if (signal.aborted) throw new SurfError('cancelled');
+    // 总量预算按组顺序分配，先到先得；每段被丢的条数记在各自 truncated 上。
+    let budget = config.resultsMaxChars;
+    if (budget > 0) {
+      for (const group of groups) {
+        const kept: SearchItem[] = [];
+        for (const item of group.results) {
+          const size = JSON.stringify(item).length + 1;
+          if (size <= budget) { kept.push(item); budget -= size; }
+        }
+        if (kept.length !== group.results.length) {
+          group.truncated = (group.truncated ?? 0) + (group.results.length - kept.length);
+          group.results = kept;
+        }
+      }
+    }
+    // 重复：同一 URL 先出现的算主，后面几家里的标 dupOf。
+    const first = new Map<string, string>();
+    let overlap = 0;
+    for (const group of groups) {
+      for (const item of group.results) {
+        const key = item.url.trim().replace(/#.*$/, '');
+        const owner = first.get(key);
+        if (owner === undefined) { first.set(key, group.provider); continue; }
+        if (owner !== group.provider && !item.dupOf) { item.dupOf = owner; overlap += 1; }
+      }
+    }
+    if (!groups.some(group => group.results.length > 0)) {
+      const why = groups.map(group => group.provider + (group.error ? ' (' + group.elapsedMs + ' ms): ' + group.error.reason
+        : group.skipped ? '：' + group.skipped : '：零条')).join(' ');
+      throw new SearchExhaustedError('search_exhausted', why);
+    }
+    const data: SearchData = { provider: 'aggregate', mode: 'aggregate', groups, results: [], overlap: overlap, untrusted: true,
+      elapsedMs: Math.round(performance.now() - started),
+      ...(notes.length ? { notes } : {}) };
+    this.cachePut(config, signal, cacheKey, data);
+    return data;
   }
   /** 学术搜索：四个公开来源顺序回退；连上但零条算应答，不一路试到“全挂”。 */
   scholar(input: ScholarInput & { sessionId: string }, options?: CallOptions): Promise<OperationResult<ScholarData>> {

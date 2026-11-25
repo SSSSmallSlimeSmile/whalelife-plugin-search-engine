@@ -167,6 +167,10 @@ export const settingsPage = `<!doctype html>
 <p class="pg-hint">只在请求 anysearch 时作为默认 zone；单次搜索可以用 search_vertical 的 zone 参数覆盖。</p></div>
 </div>
 <div class="pg-pair">
+<div class="pg-item"><label class="pg-row"><span class="pg-label">搜索方式</span><select name="searchMode" id="searchMode"><option value="fallback">顺序回退（省，一次只打一家）</option><option value="aggregate">聚合并发（全，几家同时打、分段列出）</option></select></label>
+<p class="pg-hint">回退：按来源链一家家试，前一家失败才换下一家，拿到结果就停——一次只付一份开销。聚合：链上所有来源同时发请求，各自成段原样列出，不排序、不合并，只标出重复（同一条链接被几家给出的，后来的带 dupOf，顶层给 overlap）。聚合的结果在回执的 groups 里，顶层 results 为空。开销是几倍，换来的是"一家漏了另一家能补上"。</p></div>
+</div>
+<div class="pg-pair">
 <div class="pg-item"><label class="pg-row"><span class="pg-label">结果总量上限（字符）</span><input type="number" name="resultsMaxChars" id="resultsMaxChars" min="0" max="40000" required></label>
 <p class="pg-hint">按序列化后的长度算，不是字数。十条各带一千字摘要就是一万字进上下文、之后每轮重发。超出时先截断最后一条的摘要，再超出就丢掉后面的条目；0 = 不限。默认 8000。</p></div>
 <div class="pg-item"><span class="pg-label">被截断时回执长什么样</span><p class="pg-hint" style="margin-top:0">results 里条目变少，多一个 truncated 字段写着丢了几条；摘要被切的那条末尾带省略号。至少保留一条，不会因此变成"零条结果"。</p></div>
@@ -914,6 +918,7 @@ function show(data) {
   for (const id of ["resultsLimit", "resultsMaxChars", "concurrency", "maxTextChars", "referenceTtlSeconds", "cacheSeconds", "sourceFailThreshold", "sourceCooldownSeconds"]) byId(id).value = c[id];
   byId("structuredRead").checked = c.structuredRead === true;
   byId("anysearchZone").value = c.anysearchZone;
+  byId("searchMode").value = c.searchMode === "aggregate" ? "aggregate" : "fallback";
   byId("timeoutSeconds").value = c.timeoutMs / 1000;
   byId("pageKiB").value = c.maxPageBytes / 1024;
   byId("imageKiB").value = c.maxImageBytes / 1024;
@@ -1109,6 +1114,7 @@ byId("f").onsubmit = async (event) => {
   config.searchProviders = chain.slice();
   config.sourceTimeouts = { ...timeouts };
   config.anysearchZone = byId("anysearchZone").value;
+  config.searchMode = byId("searchMode").value === "aggregate" ? "aggregate" : "fallback";
   config.timeoutMs = Number(byId("timeoutSeconds").value) * 1000;
   config.maxPageBytes = Number(byId("pageKiB").value) * 1024;
   config.maxImageBytes = Number(byId("imageKiB").value) * 1024;

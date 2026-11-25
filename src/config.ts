@@ -8,7 +8,7 @@ import { isScholarSource } from './scholar.ts';
 import { isFactSource } from './facts.ts';
 export const MAX_PROVIDERS = 6;
 export const defaults: SurfConfig = {
-  searchProviders: ['bing'], braveApiKey: '', tavilyApiKey: '', exaApiKey: '', anysearchApiKey: '', anysearchZone: 'cn',
+  searchProviders: ['bing'], searchMode: 'fallback', braveApiKey: '', tavilyApiKey: '', exaApiKey: '', anysearchApiKey: '', anysearchZone: 'cn',
   proxyUrl: '', timeoutMs: 20_000, sourceTimeouts: {},
   maxPageBytes: 2 * 1024 * 1024, maxImageBytes: 8 * 1024 * 1024,
   maxTextChars: 60_000, resultsLimit: 5, structuredRead: true, resultsMaxChars: 8000, referenceTtlSeconds: 600, concurrency: 3, cacheSeconds: 300, sourceFailThreshold: 2, sourceCooldownSeconds: 60,
@@ -136,6 +136,10 @@ export function parseConfig(value: unknown): SurfConfig {
       const value = input[key], [low, high] = limits[key];
       if (typeof value !== 'number' || !Number.isInteger(value) || value < low || value > high) throw new SurfError('config_invalid');
       result[key] = value;
+    }
+    if (input.searchMode !== undefined) {
+      if (input.searchMode !== 'fallback' && input.searchMode !== 'aggregate') throw new SurfError('config_invalid');
+      result.searchMode = input.searchMode;
     }
     if (input.structuredRead !== undefined) {
       if (typeof input.structuredRead !== 'boolean') throw new SurfError('config_invalid');

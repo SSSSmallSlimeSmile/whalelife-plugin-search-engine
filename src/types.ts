@@ -27,6 +27,11 @@ export type PublicCustomSource = Omit<CustomSource, 'key'> & { hasKey: boolean }
 export type SearchZone = 'cn' | 'intl';
 export type ScholarSource = 'arxiv' | 'crossref' | 'openalex' | 'semanticscholar' | `custom:${string}`;
 export interface SurfConfig {
+  /**
+   * fallback（默认）：一条有序链，前一家失败才换下一家，拿到结果就停。
+   * aggregate：并发打链上所有来源，各自成段原样列出，不排序、不合并。
+   */
+  searchMode: 'fallback' | 'aggregate';
   searchProviders: SearchProvider[];
   braveApiKey: string;
   tavilyApiKey: string;
@@ -97,6 +102,8 @@ export interface SearchItem {
   via?: SourceKind;
   /** 链接的主机名，去掉 www.；URL 解析失败时不出现。用来核对条目域名跟它自称的机构是否一致。 */
   domain?: string;
+  /** 聚合模式：这条 URL 在前面某一家已经出现过，值是最先给出它的那家。 */
+  dupOf?: string;
 }
 export interface CallOptions { signal?: AbortSignal }
 export interface SearchInput {
@@ -152,9 +159,29 @@ export interface FactData {
   notes?: string[];
   cached?: boolean; cachedAgoMs?: number;
 }
+/** 聚合模式下一家来源的那一段。不排序，按来源顺序原样列出，谁先谁后由配置里的链决定。 */
+export interface AggregateGroup {
+  provider: string;
+  sourceKind?: SourceKind;
+  elapsedMs: number;
+  results: SearchItem[];
+  /** 这一段里因总量上限被丢掉的条目数。 */
+  truncated?: number;
+  /** 这家失败了：code 与原因都在这里，不抛到整次调用外。 */
+  error?: { code: string; reason: string };
+  /** 冷却中被跳过，没发请求。 */
+  skipped?: string;
+}
+
 export interface SearchFailure { provider: SearchProvider; elapsedMs: number; code: string; reason: string }
+
 export interface SearchData {
   provider: string; results: SearchItem[]; untrusted: true; elapsedMs: number;
+  /** 聚合模式下这一轮真的并发打了几家（含失败与被跳过的）。 */
+  groups?: AggregateGroup[];
+  /** 聚合模式：被两家以上来源给出的同一个 URL 有几个。全一样就说明聚合白花了钱。 */
+  overlap?: number;
+  mode?: 'fallback' | 'aggregate';
   /** 采用的那家来源属于哪一类；见 SearchItem.via。 */
   sourceKind?: SourceKind;
   /** 因总量上限被丢掉的条目数；没丢就不出现这个字段。 */
