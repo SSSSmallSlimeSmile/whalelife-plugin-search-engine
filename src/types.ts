@@ -147,9 +147,29 @@ export interface ScholarInput {
 export interface ScholarItem {
   source: ScholarSource; title: string; authors: string[]; year?: number;
   venue?: string; doi?: string; url?: string; citations?: number; abstract: string;
+  /** 聚合模式：这一篇在前面某一家已经出现过（同 DOI 或同标题），值是最先给出它的来源。 */
+  dupOf?: string;
+}
+/** 学术聚合下一家来源的那一段。不排序，按来源链顺序原样列出。 */
+export interface ScholarGroup {
+  source: string;
+  elapsedMs: number;
+  items: ScholarItem[];
+  /** 这一段里因总量上限被丢掉的条目数。 */
+  truncated?: number;
+  /** 这一段分到的字符份额（按家数均分，不按一级/二级权重切）。 */
+  budgetChars?: number;
+  error?: { code: string; reason: string };
+  /** 冷却中被跳过，没发请求。 */
+  skipped?: string;
 }
 export interface ScholarData {
   source: string; items: ScholarItem[]; untrusted: true; elapsedMs: number;
+  /** 聚合模式下各家来源的那一段；items 留空，免得同一批文献在回执里出现两遍。 */
+  groups?: ScholarGroup[];
+  /** 聚合模式：被两家以上来源给出的同一篇（同 DOI 或同标题）有几条。 */
+  overlap?: number;
+  mode?: 'fallback' | 'aggregate';
   fallback?: SearchFailure[];
   notes?: string[];
   cached?: boolean; cachedAgoMs?: number;

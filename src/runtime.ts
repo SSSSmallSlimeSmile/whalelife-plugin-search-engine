@@ -15,7 +15,7 @@ import { buildFactRequest, parseFact, isFactSource } from './facts.ts';
 import { detectStructured, fetchStructured } from './structured.ts';
 import type { PublicFetcher, SurfConfig, SurfService, SurfStatus, OperationResult, ParsedPage,
   SearchData, SearchFailure, SearchItem, AggregateGroup, SearchProvider, SearchZone, SourceKind, PageData, ImageData, GalleryImageData, SearchInput, ReadInput, ImageInput, CallOptions, VisionService, GalleryService,
-  ScholarData, ScholarInput, ScholarItem,
+  ScholarData, ScholarInput, ScholarItem, ScholarGroup, ScholarSource,
   FactData, FactInput, FactFailure, FactItem } from './types.ts';
 
 type StoredPage = ParsedPage & { sessionId: string; url: string; expires: number };
@@ -78,6 +78,21 @@ function trimResults(results: SearchItem[], maxChars: number): { results: Search
 }
 /** 垂直搜索参数只对 anysearch 有意义；其余来源会在回执里说明被忽略。 */
 type Vertical = { tag?: string; zone?: SearchZone; language?: string; params?: Record<string, string> };
+/**
+ * 同一篇的判据：DOI 和归一后的标题各算一个键，任一相同就算同一篇。
+ *
+ * 只按一种算会漏：arXiv 的解析器不填 DOI、OpenAlex 填了，同一篇在两段里就是两个不同的键，
+ * 实测那次 KV-Repurpose 两边都出现了、overlap 却是 0。
+ */
+function scholarKeysOf(item: ScholarItem): string[] {
+  const keys: string[] = [];
+  const doi = item.doi?.trim().toLowerCase().replace(/^https?:\/\/(dx\.)?doi\.org\//, '');
+  if (doi) keys.push('doi:' + doi);
+  const title = item.title.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+  if (title) keys.push('title:' + title);
+  return keys;
+}
+
 function verticalOf(input: SearchInput): Vertical {
   const result: Vertical = {};
   if (input.tag !== undefined) {
@@ -561,6 +576,141 @@ export class SurfRuntime implements SurfService {
     return config.providerTiers[provider] === 2 ? 1 : 3;
   }
 
+  /**
+   * 学术聚合：并发出链上的学术来源，各自成段原样列出，不排序。
+   *
+   * 四家覆盖的不一样：arXiv 只有预印本，Crossref 只有注册了 DOI 的，OpenAlex 带被引数，
+   * Semantic Scholar 常限流。顺序回退下第一家一有结果后面就永不上场——网页那边实测十次十次停在第一家，
+   * 这里是同一个毛病。零条同样算应答：连上了、没这篇，不是故障。
+   *
+   * 预算按家数均分，不套网页那套一级/二级权重：那边的键是网页来源名，学术这边没有对应的配置。
+   */
+  private async scholarAggregated(query: string, limit: number, yearMin: number | undefined,
+    sources: ScholarSource[], signal: AbortSignal, config: SurfConfig): Promise<ScholarData> {
+    const cacheKey = this.cacheKey('scholar-agg', [query, limit, sources, yearMin ?? null, config.aggregateConcurrency]);
+    const cached = this.cacheGet<ScholarData>(cacheKey);
+    if (cached) return { ...cached.data, cached: true, cachedAgoMs: cached.agoMs };
+    const started = performance.now();
+    const notes: string[] = [];
+    const forceAll = sources.every(name => this.coolingLeft(name) > 0);
+    // 打一次；失败不抛，交给整次调用决定要不要报全挂。
+    const attempt = async (source: ScholarSource, budgetMs: number):
+      Promise<{ items: ScholarItem[]; elapsedMs: number; error?: { code: string; reason: string } }> => {
+      const at = performance.now();
+      const limitSignal = AbortSignal.timeout(Math.max(1, budgetMs));
+      const attemptSignal = AbortSignal.any([signal, limitSignal]);
+      try {
+        const request = buildRequest(source, query, limit, config.scholarMailto, config.scholarCustomSources);
+        const items = await untilCancelled(attemptSignal, async () => {
+          const response = await this.fetcher.get(request.url, { signal: attemptSignal, timeoutMs: budgetMs,
+            maxBytes: config.maxPageBytes, proxyUrl: config.proxyUrl,
+            allowRedirects: request.allowRedirects ?? true, headers: request.headers,
+            ...(request.method ? { method: request.method } : {}), ...(request.body ? { body: request.body } : {}) });
+          checkResponse(response.status);
+          return parseScholar(source, response.body, limit, config.scholarCustomSources);
+        });
+        if (limitSignal.aborted) throw new SurfError('timeout');
+        return { items, elapsedMs: Math.round(performance.now() - at) };
+      } catch (error) {
+        if (signal.aborted) throw new SurfError('cancelled');
+        const failure = safeError(limitSignal.aborted || performance.now() - at >= budgetMs ? new SurfError('timeout') : error);
+        return { items: [], elapsedMs: Math.round(performance.now() - at), error: { code: failure.code, reason: failure.message } };
+      }
+    };
+    const raw: (ScholarGroup | undefined)[] = new Array(sources.length).fill(undefined);
+    const runOne = async (index: number): Promise<void> => {
+      const source = sources[index];
+      const cooling = forceAll ? 0 : this.coolingLeft(source);
+      if (cooling > 0) {
+        raw[index] = { source, elapsedMs: 0, items: [], skipped: '上次连续失败，冷却中，还剩 ' + cooling + ' 秒' };
+        return;
+      }
+      const budget = Math.min(config.sourceTimeouts[source] ?? config.timeoutMs, config.timeoutMs);
+      const one = await attempt(source, budget);
+      if (!one.error && one.items.length > 0) {
+        const kept = yearMin === undefined ? one.items : one.items.filter(item => item.year === undefined || item.year >= yearMin);
+        if (kept.length === 0) {
+          raw[index] = { source, elapsedMs: one.elapsedMs, items: [],
+            error: { code: 'search_empty', reason: '按 yearMin 过滤掉 ' + (one.items.length - kept.length) + ' 条之后没有剩下的。' } };
+          return;
+        }
+        this.noteSourceSuccess(source);
+        raw[index] = { source, elapsedMs: one.elapsedMs, items: kept };
+        return;
+      }
+      // 零条算应答，不记健康账；真失败才记。
+      if (one.error) this.noteSourceFailure(config, source, one.error.code);
+      raw[index] = { source, elapsedMs: one.elapsedMs, items: [],
+        error: one.error ?? { code: 'search_empty', reason: '来源返回零条结果。' } };
+    };
+    // 按篇计数，不按键计数：一篇同时有 DOI 和标题两个键，算两条会把“够不够 limit”算高。
+    const uniqueCount = (): number => {
+      const seen = new Set<string>();
+      let count = 0;
+      for (const group of raw) for (const item of group?.items ?? []) {
+        const keys = scholarKeysOf(item);
+        if (keys.some(key => seen.has(key))) continue;
+        count += 1;
+        for (const key of keys) seen.add(key);
+      }
+      return count;
+    };
+    const parallel = Math.max(1, Math.min(config.aggregateConcurrency, sources.length));
+    await Promise.all(Array.from({ length: parallel }, (_, index) => runOne(index)));
+    let cursor = parallel;
+    while (cursor < sources.length && uniqueCount() < limit) {
+      await runOne(cursor);
+      cursor += 1;
+    }
+    if (signal.aborted) throw new SurfError('cancelled');
+    const groups = raw.filter((group): group is ScholarGroup => group !== undefined);
+    if (cursor < sources.length && uniqueCount() >= limit)
+      notes.push('前 ' + cursor + ' 家去重后已经有 ' + uniqueCount() + ' 条，够 limit，剩下的 ' + (sources.length - cursor) + ' 家这次没打。');
+    // 同一篇被两家给出：DOI 相同、或标题归一后相同。后来那条标 dupOf，条目仍留在它自己那一段里。
+    const first = new Map<string, string>();
+    let overlap = 0;
+    for (const group of groups) {
+      for (const item of group.items) {
+        const keys = scholarKeysOf(item);
+        const owner = keys.map(key => first.get(key)).find(value => value !== undefined);
+        if (owner === undefined) {
+          for (const key of keys) if (!first.has(key)) first.set(key, group.source);
+          continue;
+        }
+        if (owner !== group.source) { item.dupOf = owner; overlap += 1; }
+        // 同一篇后来又贡献了新键（比如这家填了 DOI，前面那家没填），补登记，后面的来源才认得。
+        for (const key of keys) if (!first.has(key)) first.set(key, group.source);
+      }
+    }
+    // 预算按家数均分再裁；摘要按整条序列化后的长度算，不按字数——中文一个字符三个字节，字数会低估。
+    const total = config.resultsMaxChars;
+    if (total > 0 && groups.length > 0) {
+      const share = Math.max(200, Math.floor(total / groups.length));
+      groups.forEach(group => {
+        group.budgetChars = share;
+        if (group.items.length === 0) return;
+        const kept: ScholarItem[] = [];
+        let used = 0;
+        for (const item of group.items) {
+          const size = JSON.stringify(item).length;
+          if (kept.length > 0 && used + size > share) { group.truncated = (group.truncated ?? 0) + 1; continue; }
+          kept.push(item);
+          used += size;
+        }
+        group.items = kept;
+      });
+    }
+    if (!groups.some(group => group.items.length > 0)) {
+      const why = groups.map(group => group.source + (group.error ? ' (' + group.elapsedMs + ' ms): ' + group.error.reason
+        : group.skipped ? '：' + group.skipped : '：零条')).join(' ');
+      throw new SearchExhaustedError('search_exhausted', why);
+    }
+    const data: ScholarData = { source: 'aggregate', mode: 'aggregate', groups, items: [], overlap,
+      untrusted: true, elapsedMs: Math.round(performance.now() - started),
+      ...(notes.length ? { notes } : {}) };
+    this.cachePut(config, signal, cacheKey, data);
+    return data;
+  }
   /** 学术搜索：四个公开来源顺序回退；连上但零条算应答，不一路试到“全挂”。 */
   scholar(input: ScholarInput & { sessionId: string }, options?: CallOptions): Promise<OperationResult<ScholarData>> {
     return this.execute(input?.sessionId, options, async (_session, signal) => {
@@ -584,6 +734,9 @@ export class SurfRuntime implements SurfService {
             new Set(list).size !== list.length) throw new SurfError('invalid_input');
         sources = [...list];
       }
+      // 聚合模式：并发出链上的学术来源，各自成段列出。事实查询不走这条，仍按顺序回退。
+      if (config.searchMode === 'aggregate')
+        return this.scholarAggregated(query, limit, yearMin, sources, signal, config);
       const scholarKey = this.cacheKey('scholar', [query, limit, sources, yearMin ?? null]);
       const scholarHit = this.cacheGet<ScholarData>(scholarKey);
       if (scholarHit) return { ...scholarHit.data, cached: true, cachedAgoMs: scholarHit.agoMs };
