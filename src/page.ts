@@ -1271,7 +1271,10 @@ byId("scholarProbeAll").onclick = async () => {
     for (const item of data.sources) {
       const seg = document.createElement("div"); seg.className = "po-seg";
       const title = document.createElement("div"); title.className = "po-title";
-      title.textContent = item.source + " \u00b7 " + item.ms + " ms \u00b7 " + (item.ok ? item.count + " \u6761" : (item.reason || "\u6ca1\u62ff\u5230"));
+      const tally = (item.returned > item.count ? "\uff0c\u8fd4\u56de " + item.returned : "")
+        + (item.shared > 0 ? "\uff0c\u522b\u5bb6\u4e5f\u6709 " + item.shared : "");
+      title.textContent = item.source + " \u00b7 " + item.ms + " ms \u00b7 "
+        + (item.ok ? item.count + " \u6761" + tally : (item.reason || "\u6ca1\u62ff\u5230"));
       seg.append(title);
       for (const line of item.titles) {
         const one = document.createElement("div"); one.className = "po-item"; one.textContent = "\u00b7 " + line; seg.append(one);

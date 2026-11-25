@@ -159,6 +159,12 @@ export interface ScholarGroup {
   source: string;
   elapsedMs: number;
   items: ScholarItem[];
+  /** 这一家在去重与裁剪之前原始返回了多少条。 */
+  returned?: number;
+  /** 这一段最后展示了几条（裁完之后）。 */
+  shown?: number;
+  /** 这一段里有几条是别家也给出的（同 DOI 或同标题）。跟 returned 比就是重合率。 */
+  shared?: number;
   /** 这一段里因总量上限被丢掉的条目数。 */
   truncated?: number;
   /** 这一段分到的字符份额（按家数均分，不按一级/二级权重切）。 */
@@ -202,6 +208,14 @@ export interface AggregateGroup {
   sourceKind?: SourceKind;
   elapsedMs: number;
   results: SearchItem[];
+  /** 这一家在去重与裁剪之前原始返回了多少条。 */
+  returned?: number;
+  /** 这一段最后展示了几条（裁完之后）。 */
+  shown?: number;
+  /** 这一段里有几条是别家也给出的（标了 dupOf）。跟 returned 比就是重合率。 */
+  shared?: number;
+  /** 这一段里 api / html / custom 各几条。 */
+  viaMix?: Partial<Record<SourceKind, number>>;
   /** 这一段里因总量上限被丢掉的条目数。 */
   truncated?: number;
   /** 这一段分到的权重与字符份额（预算按权重切）。 */

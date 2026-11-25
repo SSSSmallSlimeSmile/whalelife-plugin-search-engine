@@ -615,6 +615,16 @@ export class SurfRuntime implements SurfService {
     }
     if (signal.aborted) throw new SurfError('cancelled');
     const groups = raw.filter((group): group is AggregateGroup => group !== undefined);
+    // 每段自报家底：原始返回几条、由什么通道回来。裁完之后再补 shown。
+    for (const group of groups) {
+      group.returned = group.results.length;
+      const mix: Partial<Record<SourceKind, number>> = {};
+      for (const item of group.results) {
+        const kind = item.via ?? group.sourceKind ?? 'api';
+        mix[kind] = (mix[kind] ?? 0) + 1;
+      }
+      group.viaMix = mix;
+    }
     if (cursor < providers.length && uniqueCount() >= limit)
       notes.push('前 ' + cursor + ' 家去重后已经有 ' + uniqueCount() + ' 条，够 limit，剩下的 ' + (providers.length - cursor) + ' 家这次没打。');
     // 重复：同一 URL 先出现的算主，后面几家里的标 dupOf。
@@ -625,7 +635,9 @@ export class SurfRuntime implements SurfService {
         const key = item.url.trim().replace(/#.*$/, '');
         const owner = first.get(key);
         if (owner === undefined) { first.set(key, group.provider); continue; }
-        if (owner !== group.provider && !item.dupOf) { item.dupOf = owner; overlap += 1; }
+        if (owner !== group.provider && !item.dupOf) {
+          item.dupOf = owner; overlap += 1; group.shared = (group.shared ?? 0) + 1;
+        }
       }
     }
     // 翻页用：裁之前先存一份完整的，之后传 more 就能取下一批。
@@ -668,6 +680,7 @@ export class SurfRuntime implements SurfService {
       }).join(' ');
       throw new SearchExhaustedError('search_exhausted', why);
     }
+    for (const group of groups) group.shown = group.results.length;
     const shownItems = groups.flatMap(group => group.results);
     const hasMore = this.markServed(stored.id, shownItems);
     const data: SearchData = { provider: 'aggregate', mode, groups, results: [], overlap: overlap, untrusted: true,
@@ -788,6 +801,7 @@ export class SurfRuntime implements SurfService {
     }
     if (signal.aborted) throw new SurfError('cancelled');
     const groups = raw.filter((group): group is ScholarGroup => group !== undefined);
+    for (const group of groups) group.returned = group.items.length;
     if (cursor < sources.length && uniqueCount() >= limit)
       notes.push('前 ' + cursor + ' 家去重后已经有 ' + uniqueCount() + ' 条，够 limit，剩下的 ' + (sources.length - cursor) + ' 家这次没打。');
     // 同一篇被两家给出：DOI 相同、或标题归一后相同。后来那条标 dupOf，条目仍留在它自己那一段里。
@@ -801,7 +815,7 @@ export class SurfRuntime implements SurfService {
           for (const key of keys) if (!first.has(key)) first.set(key, group.source);
           continue;
         }
-        if (owner !== group.source) { item.dupOf = owner; overlap += 1; }
+        if (owner !== group.source) { item.dupOf = owner; overlap += 1; group.shared = (group.shared ?? 0) + 1; }
         // 同一篇后来又贡献了新键（比如这家填了 DOI，前面那家没填），补登记，后面的来源才认得。
         for (const key of keys) if (!first.has(key)) first.set(key, group.source);
       }
@@ -841,6 +855,7 @@ export class SurfRuntime implements SurfService {
         : group.skipped ? '：' + group.skipped : '：零条')).join(' ');
       throw new SearchExhaustedError('search_exhausted', why);
     }
+    for (const group of groups) group.shown = group.items.length;
     const data: ScholarData = { source: 'aggregate', mode: 'aggregate', groups, items: [], overlap,
       untrusted: true, elapsedMs: Math.round(performance.now() - started),
       ...(notes.length ? { notes } : {}) };
@@ -1068,7 +1083,8 @@ export class SurfRuntime implements SurfService {
   }
   /** 设置页「四家一起」用：按当前链并发打一轮，各自成段返回，不写配置、不进回执。 */
   async probeScholarAll(input: { query?: string }): Promise<{ ok: boolean; ms: number; detail?: string;
-    sources: { source: string; ok: boolean; ms: number; count: number; titles: string[]; reason?: string }[] }> {
+    sources: { source: string; ok: boolean; ms: number; count: number; returned: number; shared: number;
+      titles: string[]; reason?: string }[] }> {
     const started = performance.now();
     try {
       if (this.stopped || this.signal.aborted) throw new SurfError('stopped');
@@ -1082,6 +1098,8 @@ export class SurfRuntime implements SurfService {
         ok: group.items.length > 0,
         ms: group.elapsedMs,
         count: group.items.length,
+        returned: group.returned ?? group.items.length,
+        shared: group.shared ?? 0,
         titles: group.items.slice(0, 3).map(item => String(item.title || '').slice(0, 100)),
         ...(group.error ? { reason: group.error.reason } : {}),
         ...(!group.error && group.items.length === 0 ? { reason: group.skipped || '零条' } : {}),
