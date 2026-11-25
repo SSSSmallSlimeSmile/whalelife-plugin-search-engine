@@ -338,15 +338,15 @@ const result = await search.search({ query: 'prompt caching', limit: 5, sessionI
 curl -i -X POST http://127.0.0.1:9270/api/login \
   -H "Content-Type: application/json" -d "{\"password\":\"\"}"
 
-# 2. 调接口，令牌走 x-search-token（也认 Authorization: Bearer）
+# 2. 调接口，发送一个 Authorization 头，使用 Bearer 和一个空格
 curl -X POST http://127.0.0.1:9270/plugins/search-engine/api \
   -H "Content-Type: application/json" \
-  -H "x-search-token: 你的令牌" \
+  -H "Authorization: Bearer 你的令牌" \
   -H "Cookie: whale=…" \
-  -d "{\"tool\":\"search\",\"client\":\"my-script\",\"query\":\"prompt caching\",\"limit\":5}"
+  -d "{\"tool\":\"search\",\"client\":\"myscript\",\"query\":\"prompt caching\",\"limit\":5}"
 ```
 
-`client` 可选，1–32 位字母数字加 `-` `_`，缺省 `default`。它决定翻页结果集归谁：两个程序各用各的 `client`，互相拿不到对方的 `setId`。
+`client` 可选，1–32 位 ASCII 字母或数字，区分大小写，缺省 `default`。分页结果集按 `client` 分组。同一令牌下，调用者可以选择任意 `client`，因此不同调用者之间的隔离依赖共享信任。
 
 `tool` 有四个：
 

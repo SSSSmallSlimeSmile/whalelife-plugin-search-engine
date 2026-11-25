@@ -195,7 +195,8 @@ export async function applyWithDependencies(ctx: Context, dependencies: Dependen
   const configHandler = wrap(async (req, res, { signal }) => {
     if (req.method === 'GET') { res.setHeader('Content-Type', 'application/json; charset=utf-8'); res.end(JSON.stringify(state())); return; }
     if (req.method !== 'POST') { res.statusCode = 405; res.end(); return; }
-    if (!req.headers['content-type']?.toLowerCase().startsWith('application/json')) throw new SurfError('invalid_input');
+    if (req.headers['content-type']?.split(';', 1)[0].trim().toLowerCase() !== 'application/json')
+      throw new SurfError('invalid_input');
     const body = object(await readJsonBody(req, AbortSignal.any([signal, ctx.signal])));
     const change = saving.then(async () => {
       if (signal.aborted || ctx.signal.aborted) throw new SurfError('cancelled');
@@ -258,25 +259,31 @@ export async function applyWithDependencies(ctx: Context, dependencies: Dependen
     if (req.method !== 'POST') { res.statusCode = 405; res.end(); return; }
     const expected = expectedTokenDigest;
     if (!expected) throw new SurfError('api_disabled');
-    const bearer = /^Bearer[ \t]+(\S+)$/i.exec(req.headers.authorization?.trim() ?? '')?.[1];
-    const header = String(req.headers['x-search-token'] ?? '').trim() || bearer || '';
-    if (!timingSafeEqual(tokenDigest(header), expected)) throw new SurfError('api_unauthorized');
+    const authorizationCount = req.headersDistinct?.authorization?.length
+      ?? req.rawHeaders?.filter((name, index) => index % 2 === 0 && name.toLowerCase() === 'authorization').length;
+    if (authorizationCount !== undefined && authorizationCount !== 1) throw new SurfError('api_unauthorized');
+    const bearer = /^Bearer ([A-Za-z0-9_-]+)$/.exec(req.headers.authorization ?? '')?.[1];
+    if (!bearer || !timingSafeEqual(tokenDigest(bearer), expected)) throw new SurfError('api_unauthorized');
     if (req.headers['content-type']?.split(';', 1)[0].trim().toLowerCase() !== 'application/json')
       throw new SurfError('invalid_input');
-    const body = object(await readJsonBody(req, AbortSignal.any([signal, ctx.signal]), { maxBytes: 8_192 }));
-    // 每个调用方一个会话：翻页结果集按会话隔离，两个程序同时调不会互相踩。
-    const client = typeof body.client === 'string' ? body.client.trim() : '';
-    if (client && !/^[A-Za-z0-9_-]{1,32}$/.test(client)) throw new SurfError('invalid_input');
-    const sessionId = 'api:' + (client || 'default');
+    const requestSignal = AbortSignal.any([signal, ctx.signal]);
+    const body = object(await readJsonBody(req, requestSignal, { maxBytes: 8_192 }));
+    if (requestSignal.aborted) throw new SurfError('cancelled');
+    const client = body.client;
+    if (client !== undefined && (typeof client !== 'string' || !/^[A-Za-z0-9]{1,32}$/.test(client)))
+      throw new SurfError('invalid_input');
+    // client 是共享令牌下的分页命名空间，不是调用者身份。
+    const sessionId = 'api:' + (client ?? 'default');
+    const options = { signal: requestSignal };
     let result: unknown;
     if (body.tool === 'status') result = runtime.status();
     else if (body.tool === 'search') result = await runtime.search({ query: body.query, limit: body.limit,
       more: body.more, tag: body.tag, params: body.params, zone: body.zone, language: body.language,
-      sessionId } as SearchInput & { sessionId: string });
+      sessionId } as SearchInput & { sessionId: string }, options);
     else if (body.tool === 'scholar') result = await runtime.scholar({ query: body.query, limit: body.limit,
-      sources: body.sources, yearMin: body.yearMin, sessionId } as ScholarInput & { sessionId: string });
+      sources: body.sources, yearMin: body.yearMin, sessionId } as ScholarInput & { sessionId: string }, options);
     else if (body.tool === 'facts') result = await runtime.facts({ query: body.query, limit: body.limit,
-      sources: body.sources, lang: body.lang, sessionId } as FactInput & { sessionId: string });
+      sources: body.sources, lang: body.lang, sessionId } as FactInput & { sessionId: string }, options);
     else throw new SurfError('invalid_input');
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.end(JSON.stringify(result));

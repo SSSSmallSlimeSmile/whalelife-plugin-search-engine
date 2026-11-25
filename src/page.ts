@@ -262,7 +262,7 @@ export const settingsPage = `<!doctype html>
 <div class="pg-item" style="margin-top:16px"><span class="pg-label">对外接口</span>
 <p class="pg-hint" style="margin-top:0">别的程序（脚本、别的 agent）可以按令牌调 search / scholar / facts / status。不开放“读网页”——那等于把任意 URL 的出口借出去。令牌空着就是不开放，填了保存后立刻生效；要关就勾「清掉已设的令牌」再保存。保存后页面不再显示明文。</p></div>
 <div class="pg-pair">
-<div class="pg-item"><label class="pg-row"><span class="pg-label">令牌（16–128 位字母数字）</span><input type="text" name="apiToken" id="apiToken" autocomplete="off" placeholder="留空 = 不开放"></label>
+<div class="pg-item"><label class="pg-row"><span class="pg-label">令牌（16–128 位字母数字及 - _）</span><input type="text" name="apiToken" id="apiToken" autocomplete="off" placeholder="留空 = 不开放"></label>
 <p class="pg-hint">存盘后页面不再显示明文，只显示「已设置」。谁拿到都能花你的额度，勾下面那个再保存即可关闭。</p>
 <label class="pg-row" style="margin-top:6px"><input type="checkbox" id="apiTokenClear"> <span>清掉已设的令牌（等于关闭对外接口）</span></label></div>
 <div class="pg-item"><span class="pg-label">生成一个</span>
@@ -271,7 +271,7 @@ export const settingsPage = `<!doctype html>
 <div class="pg-item"><span class="pg-label">怎么调</span>
 <p class="pg-hint" style="margin-top:0">接口走宿主的登录态，第一步先拿 cookie（网页没设密码时这么拿）：</p>
 <p class="pg-hint" style="margin-top:0">1. curl -i -X POST http://127.0.0.1:9270/api/login -H "Content-Type: application/json" -d "{\"password\":\"\"}"　→ 从 Set-Cookie 里取 whale=…</p>
-<p class="pg-hint" style="margin-top:0">2. curl -X POST http://127.0.0.1:9270/plugins/search-engine/api -H "Content-Type: application/json" -H "x-search-token: 你的令牌" -H "Cookie: whale=…" -d "{\"tool\":\"search\",\"query\":\"prompt caching\",\"limit\":5}"</p>
+<p class="pg-hint" style="margin-top:0">2. curl -X POST http://127.0.0.1:9270/plugins/search-engine/api -H "Content-Type: application/json" -H "Authorization: Bearer 你的令牌" -H "Cookie: whale=…" -d "{\"tool\":\"search\",\"query\":\"prompt caching\",\"limit\":5}"</p>
 <p class="pg-hint" style="margin-top:0">tool 可传 search（query / limit / more / tag / params / zone / language）、scholar（query / limit / sources / yearMin）、facts（query / limit / sources / lang）、status。回执和工具那边同一份。</p></div>
 </section>
 
