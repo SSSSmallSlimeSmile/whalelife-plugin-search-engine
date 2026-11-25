@@ -59,7 +59,14 @@ export const settingsPage = `<!doctype html>
 .chain-btns button:hover{border-color:#7c5cff;color:#6d4aff}
 .chain-btns button:disabled{opacity:.4;cursor:default}
 .chain-btns button.del-x{border-color:transparent;background:transparent;color:#9ca3af;font-size:15px;line-height:1;padding:2px 7px}
+.chain-btns .del-x{margin-left:auto}
 .chain-btns button.del-x:hover{border-color:rgba(107,114,128,.4);color:#4b5563;background:rgba(107,114,128,.08)}
+.probe-out{margin-top:8px;font-size:12px;color:#4b5563;border:1px solid rgba(124,92,255,.25);border-radius:8px;padding:8px 10px;background:rgba(124,92,255,.04);max-height:280px;overflow:auto}
+.probe-out .po-head{color:#6d4aff;margin-bottom:4px}
+.probe-out .po-seg{margin-top:6px}
+.probe-out .po-seg:first-of-type{margin-top:0}
+.probe-out .po-title{font-weight:600}
+.probe-out .po-item{color:#6b7280;padding-left:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .chain-add{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px}
 .presets{display:flex;flex-direction:column;gap:10px;margin-top:12px}
 .preset-group{display:grid;grid-template-columns:repeat(auto-fill,minmax(228px,1fr));gap:8px}
@@ -280,8 +287,8 @@ export const settingsPage = `<!doctype html>
 <div class="pg-item"><span class="pg-label">试一下</span>
 <div class="pg-item"><select id="scholarSrcSel"><option value="arxiv">arXiv</option><option value="openalex">OpenAlex</option><option value="crossref">Crossref</option><option value="semanticscholar">Semantic Scholar</option></select>
 <input type="text" id="scholarQuery" placeholder="检索词，例如 transformer attention"></div>
-<button class="btn" type="button" id="scholarProbe">试一下</button> <span class="chain-msg" id="scholarMsg"></span>
-<p class="pg-hint">只直连选中的那个来源一次，不改配置、不写回执。邮箱取上面那一栏当前的值。</p></div>
+<button class="btn" type="button" id="scholarProbe">试一下</button> <span class="chain-msg" id="scholarMsg"></span> <button class="btn" type="button" id="scholarProbeAll">四家一起</button>
+<p class="pg-hint">「试一下」只打选中那一家；「四家一起」按当前链上的来源并发打一轮，各自成段列出。两个都不改配置、不写回执。</p><div class="probe-out" id="scholarOut" hidden></div></div>
 </div>
 </section>
 
@@ -496,9 +503,9 @@ function renderRow(name, index) {
   weight.addEventListener("change", () => { weights[name] = Number(weight.value); });
   const btns = document.createElement("span"); btns.className = "chain-btns";
   const mk = (text, act, disabled, cls) => { const b = document.createElement("button"); b.type = "button"; b.textContent = text; b.dataset.act = act; b.dataset.name = name; b.disabled = Boolean(disabled); if (cls) b.className = cls; return b; };
-  const delBtn = mk("\u00d7", "del", chain.length <= 1, "del-x"); delBtn.title = "\u5220\u9664\u8fd9\u4e2a\u6765\u6e90"; btns.append(delBtn, mk("\u8bd5\u4e00\u4e0b", "probe", false));
+  const delBtn = mk("\u00d7", "del", chain.length <= 1, "del-x"); delBtn.title = "\u5220\u9664\u8fd9\u4e2a\u6765\u6e90"; btns.append(mk("\u8bd5\u4e00\u4e0b", "probe", false));
   if (tier === 1 && list[0] === name) btns.append(standbyPick(name));
-  const msg = document.createElement("span"); msg.className = "chain-msg"; btns.append(msg);
+  const msg = document.createElement("span"); msg.className = "chain-msg"; btns.append(msg, delBtn);
   row.append(grip, label, weight, order, btns);
   return row;
 }
@@ -1241,6 +1248,36 @@ byId("scholarProbe").onclick = async () => {
   }
 };
 
+byId("scholarProbeAll").onclick = async () => {
+  const box = byId("scholarOut");
+  box.hidden = false;
+  box.className = "probe-out";
+  box.textContent = "\u8bf7\u6c42\u4e2d\u2026";
+  try {
+    const res = await fetch("/plugins/search-engine/scholar-probe-all", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: byId("scholarQuery").value.trim() || undefined }) });
+    const data = await res.json().catch(() => ({}));
+    if (!data.sources || !data.sources.length) { box.className = "probe-out err"; box.textContent = "\u6ca1\u901a \u00b7 " + (data.detail || "\u6ca1\u6709\u6765\u6e90\u8fd4\u56de"); return; }
+    box.className = "probe-out";
+    box.textContent = "";
+    const head = document.createElement("div"); head.className = "po-head";
+    head.textContent = "\u94fe\u4e0a " + data.sources.length + " \u5bb6\u5e76\u53d1 \u00b7 \u603b\u8017\u65f6 " + data.ms + " ms";
+    box.append(head);
+    for (const item of data.sources) {
+      const seg = document.createElement("div"); seg.className = "po-seg";
+      const title = document.createElement("div"); title.className = "po-title";
+      title.textContent = item.source + " \u00b7 " + item.ms + " ms \u00b7 " + (item.ok ? item.count + " \u6761" : (item.reason || "\u6ca1\u62ff\u5230"));
+      seg.append(title);
+      for (const line of item.titles) {
+        const one = document.createElement("div"); one.className = "po-item"; one.textContent = "\u00b7 " + line; seg.append(one);
+      }
+      box.append(seg);
+    }
+  } catch (error) {
+    box.className = "probe-out err";
+    box.textContent = "\u6ca1\u901a \u00b7 " + (error && error.message ? error.message : error);
+  }
+};
 byId("factProbe").onclick = async () => {
   const msg = byId("factMsg");
   msg.className = "chain-msg";

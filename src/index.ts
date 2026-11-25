@@ -221,6 +221,14 @@ export async function applyWithDependencies(ctx: Context, dependencies: Dependen
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.end(JSON.stringify(result));
   }));
+  // 设置页的学术「四家一起」：只读探活。
+  ctx.web.api('/plugins/search-engine/scholar-probe-all', wrap(async (req, res) => {
+    if (req.method !== 'POST') { res.statusCode = 405; res.end(); return; }
+    const body = object(await readJsonBody(req, AbortSignal.timeout(30_000)));
+    const result = await runtime.probeScholarAll({ query: body.query as string | undefined });
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.end(JSON.stringify(result));
+  }));
   // 设置页的事实源「试一下」：只读探活。
   ctx.web.api('/plugins/search-engine/fact-probe', wrap(async (req, res) => {
     if (req.method !== 'POST') { res.statusCode = 405; res.end(); return; }

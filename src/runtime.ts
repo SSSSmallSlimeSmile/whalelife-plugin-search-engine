@@ -904,6 +904,32 @@ export class SurfRuntime implements SurfService {
       return { ok: false, ms: Math.round(performance.now() - started), detail: safe.message || safe.code };
     }
   }
+  /** 设置页「四家一起」用：按当前链并发打一轮，各自成段返回，不写配置、不进回执。 */
+  async probeScholarAll(input: { query?: string }): Promise<{ ok: boolean; ms: number; detail?: string;
+    sources: { source: string; ok: boolean; ms: number; count: number; titles: string[]; reason?: string }[] }> {
+    const started = performance.now();
+    try {
+      if (this.stopped || this.signal.aborted) throw new SurfError('stopped');
+      const config = this.config;
+      const query = typeof input.query === 'string' && input.query.trim() ? input.query.trim().slice(0, 200) : 'transformer';
+      const budget = Math.min(config.timeoutMs, 20_000);
+      const signal = AbortSignal.any([this.signal, AbortSignal.timeout(budget)]);
+      const data = await this.scholarAggregated(query, 3, undefined, config.scholarSources, signal, config);
+      const sources = (data.groups ?? []).map(group => ({
+        source: group.source,
+        ok: group.items.length > 0,
+        ms: group.elapsedMs,
+        count: group.items.length,
+        titles: group.items.slice(0, 3).map(item => String(item.title || '').slice(0, 100)),
+        ...(group.error ? { reason: group.error.reason } : {}),
+        ...(!group.error && group.items.length === 0 ? { reason: group.skipped || '零条' } : {}),
+      }));
+      return { ok: sources.some(item => item.ok), ms: Math.round(performance.now() - started), sources };
+    } catch (error) {
+      const safe = safeError(error);
+      return { ok: false, ms: Math.round(performance.now() - started), detail: safe.message || safe.code, sources: [] };
+    }
+  }
   /** 设置页「试一下」用：只打一个学术来源，不写配置、不进回执。 */
   async probeScholar(input: { source?: string; query?: string }): Promise<{ ok: boolean; ms: number; detail: string }> {
     const started = performance.now();
