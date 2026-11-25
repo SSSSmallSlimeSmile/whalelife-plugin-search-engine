@@ -40,6 +40,8 @@ export interface SurfConfig {
   maxImageBytes: number;
   maxTextChars: number;
   resultsLimit: number;
+  /** 单次网页搜索结果的总字符上限（按序列化长度算），0 = 不限。摘要一千字一条，十条就是一万字进上下文。 */
+  resultsMaxChars: number;
   referenceTtlSeconds: number;
   concurrency: number;
   /** 学术搜索：默认不注册工具，开关打开后才有 search_scholar。 */
@@ -133,6 +135,8 @@ export interface FactData {
 export interface SearchFailure { provider: SearchProvider; elapsedMs: number; code: string; reason: string }
 export interface SearchData {
   provider: string; results: SearchItem[]; untrusted: true; elapsedMs: number;
+  /** 因总量上限被丢掉的条目数；没丢就不出现这个字段。 */
+  truncated?: number;
   fallback?: SearchFailure[];
   /** Per-call notes: which sources ignored tag/zone/language, and why. */
   notes?: string[];

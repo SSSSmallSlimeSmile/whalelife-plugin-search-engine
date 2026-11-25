@@ -13,7 +13,7 @@ import type { JsonShapeGuess } from './custom.ts';
 import { buildRequest, parseScholar, isScholarSource } from './scholar.ts';
 import { buildFactRequest, parseFact, isFactSource } from './facts.ts';
 import type { PublicFetcher, SurfConfig, SurfService, SurfStatus, OperationResult, ParsedPage,
-  SearchData, SearchFailure, SearchProvider, SearchZone, PageData, ImageData, GalleryImageData, SearchInput, ReadInput, ImageInput, CallOptions, VisionService, GalleryService,
+  SearchData, SearchFailure, SearchItem, SearchProvider, SearchZone, PageData, ImageData, GalleryImageData, SearchInput, ReadInput, ImageInput, CallOptions, VisionService, GalleryService,
   ScholarData, ScholarInput, ScholarItem,
   FactData, FactInput, FactFailure, FactItem } from './types.ts';
 
@@ -21,6 +21,37 @@ type StoredPage = ParsedPage & { sessionId: string; url: string; expires: number
 type StoredOffer = { sessionId: string; binding: OptionalService<VisionService>; media: ImageData; expires: number };
 type StoredCollectionOffer = { sessionId: string; binding: OptionalService<GalleryService>; media: GalleryImageData; expires: number };
 const PAGE_CHUNK = 6000;
+/**
+ * 结果总量上限：按序列化后的长度算（JSON.stringify），不是字数。
+ * 十条各带一千字摘要，就是一万字进上下文，之后每轮重发——这里给它一个刹车。
+ * 超出时先截断最后一条的摘要，再超出就丢掉后面的条目；至少保留一条，不让结果变成“零条”。
+ */
+function trimResults(results: SearchItem[], maxChars: number): { results: SearchItem[]; truncated: number } {
+  if (maxChars <= 0 || results.length === 0) return { results, truncated: 0 };
+  const cost = (item: SearchItem) => JSON.stringify(item).length;
+  const kept: SearchItem[] = [];
+  let used = 0;
+  for (const item of results) {
+    const size = cost(item);
+    if (used + size <= maxChars) { kept.push(item); used += size; continue; }
+    const room = maxChars - used;
+    // snippet 为空时序列化只剩前后两个引号，减掉它们才是骨架的真实长度。
+    const skeleton = cost({ ...item, snippet: '' }) - 2;
+    if (kept.length > 0 && room > skeleton + 40) {
+      let snippet = item.snippet.slice(0, room - skeleton - 20);
+      if (/[\uD800-\uDBFF]$/.test(snippet)) snippet = snippet.slice(0, -1);
+      kept.push({ ...item, snippet: snippet.trimEnd() + '…' });
+    }
+    break;
+  }
+  if (kept.length === 0) {
+    // 预算小到连一条都装不下：留第一条的骨架，摘要截到剩下多少算多少。
+    let snippet = results[0].snippet.slice(0, Math.max(0, maxChars - 60));
+    if (/[\uD800-\uDBFF]$/.test(snippet)) snippet = snippet.slice(0, -1);
+    kept.push({ ...results[0], snippet });
+  }
+  return { results: kept, truncated: results.length - kept.length };
+}
 /** 垂直搜索参数只对 anysearch 有意义；其余来源会在回执里说明被忽略。 */
 type Vertical = { tag?: string; zone?: SearchZone; language?: string; params?: Record<string, string> };
 function verticalOf(input: SearchInput): Vertical {
@@ -290,7 +321,9 @@ export class SurfRuntime implements SurfService {
             fallback.push({ provider, elapsedMs: Math.round(performance.now() - started), code: 'search_empty', reason: '来源返回零条结果。' });
             continue;
           }
-          const found: SearchData = { provider, results, untrusted: true, elapsedMs: Math.round(performance.now() - started),
+          const trimmed = trimResults(results, this.config.resultsMaxChars);
+          const found: SearchData = { provider, results: trimmed.results, untrusted: true, elapsedMs: Math.round(performance.now() - started),
+            ...(trimmed.truncated ? { truncated: trimmed.truncated } : {}),
             ...(fallback.length ? { fallback } : {}), ...(notes.length ? { notes } : {}) };
           this.cachePut(cacheKey, found);
           return found;

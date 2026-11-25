@@ -174,6 +174,11 @@ export const settingsPage = `<!doctype html>
 <div class="pg-item"><label class="pg-row"><span class="pg-label">AnySearch 区域</span><select name="anysearchZone" id="anysearchZone"><option value="cn">cn 国内</option><option value="intl">intl 国际</option></select></label>
 <p class="pg-hint">只在请求 anysearch 时作为默认 zone；单次搜索可以用 search_vertical 的 zone 参数覆盖。</p></div>
 </div>
+<div class="pg-pair">
+<div class="pg-item"><label class="pg-row"><span class="pg-label">结果总量上限（字符）</span><input type="number" name="resultsMaxChars" id="resultsMaxChars" min="0" max="40000" required></label>
+<p class="pg-hint">按序列化后的长度算，不是字数。十条各带一千字摘要就是一万字进上下文、之后每轮重发。超出时先截断最后一条的摘要，再超出就丢掉后面的条目；0 = 不限。默认 8000。</p></div>
+<div class="pg-item"><span class="pg-label">被截断时回执长什么样</span><p class="pg-hint" style="margin-top:0">results 里条目变少，多一个 truncated 字段写着丢了几条；摘要被切的那条末尾带省略号。至少保留一条，不会因此变成"零条结果"。</p></div>
+</div>
 </section>
 
 <section class="pg-group" id="pg-search" hidden>
@@ -724,7 +729,7 @@ function show(data) {
   chain = [...c.searchProviders];
   timeouts = { ...(c.sourceTimeouts || {}) };
   renderChain();
-  for (const id of ["resultsLimit", "concurrency", "maxTextChars", "referenceTtlSeconds", "cacheSeconds"]) byId(id).value = c[id];
+  for (const id of ["resultsLimit", "resultsMaxChars", "concurrency", "maxTextChars", "referenceTtlSeconds", "cacheSeconds"]) byId(id).value = c[id];
   byId("anysearchZone").value = c.anysearchZone;
   byId("timeoutSeconds").value = c.timeoutMs / 1000;
   byId("pageKiB").value = c.maxPageBytes / 1024;
@@ -878,7 +883,7 @@ byId("factProbe").onclick = async () => {
 byId("f").onsubmit = async (event) => {
   event.preventDefault();
   const config = {};
-  for (const id of ["resultsLimit", "concurrency", "maxTextChars", "referenceTtlSeconds", "cacheSeconds"]) config[id] = Number(byId(id).value);
+  for (const id of ["resultsLimit", "resultsMaxChars", "concurrency", "maxTextChars", "referenceTtlSeconds", "cacheSeconds"]) config[id] = Number(byId(id).value);
   config.searchProviders = chain.slice();
   config.sourceTimeouts = { ...timeouts };
   config.anysearchZone = byId("anysearchZone").value;
