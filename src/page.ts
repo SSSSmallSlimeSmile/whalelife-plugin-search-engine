@@ -30,15 +30,15 @@ export const settingsPage = `<!doctype html>
 .pg-actions{display:flex;align-items:center;gap:12px;margin-left:auto}
 #msg{font-size:13px;color:#797e8c}
 #msg.err{color:#b91c1c}
-.chain{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
-.chain-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid rgba(127,127,127,.28);border-radius:8px;background:rgba(127,127,127,.04);font-size:14px;cursor:grab}
+.chain{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px}
+.chain-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:6px 8px;padding:8px 10px;border:1px solid rgba(127,127,127,.28);border-radius:9px;background:rgba(127,127,127,.04);font-size:13px;cursor:grab}
 .chain-row.drag{opacity:.45}
 .chain-row.over{border-color:#7c5cff;box-shadow:0 0 0 3px rgba(124,92,255,.12)}
 .chain-row .grip{color:#9aa0b0;letter-spacing:-1px;user-select:none}
-.chain-row b{font-weight:600;min-width:110px}
+.chain-row b{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chain-row em{font-style:normal;font-size:12px;color:#9aa0b0}
-.chain-btns{margin-left:auto;display:flex;align-items:center;gap:6px}
-.chain-btns button{background:transparent;border:1px solid rgba(127,127,127,.3);color:inherit;border-radius:6px;padding:3px 9px;font-size:12px;cursor:pointer;font-family:inherit}
+.chain-btns{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:5px}
+.chain-btns button{background:transparent;border:1px solid rgba(127,127,127,.3);color:inherit;border-radius:6px;padding:2px 7px;font-size:11px;cursor:pointer;font-family:inherit}
 .chain-btns button:hover{border-color:#7c5cff;color:#6d4aff}
 .chain-btns button:disabled{opacity:.4;cursor:default}
 .chain-add{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px}
@@ -72,6 +72,17 @@ export const settingsPage = `<!doctype html>
 #customForm{position:fixed;z-index:9998;left:0;top:0;width:min(760px,calc(100vw - 24px));max-height:calc(100vh - 32px);overflow:auto;padding:14px 14px 10px;border:1px solid rgba(127,127,127,.34);border-radius:12px;background:#fff;box-shadow:0 18px 50px rgba(15,23,42,.2)}
 #customForm[hidden]{display:none}
 #customForm .cf-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:8px;cursor:move;user-select:none}
+.src-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(228px,1fr));gap:8px;margin-top:8px}
+.src-card{position:relative;display:flex;flex-direction:column;gap:3px;padding:9px 30px 10px 11px;border:1px solid rgba(127,127,127,.3);border-radius:9px;cursor:pointer;transition:border-color .12s,box-shadow .12s,background .12s}
+.src-card:hover{border-color:#7c5cff}
+.src-card input{position:absolute;opacity:0;width:0;height:0;pointer-events:none}
+.src-card b{font-size:13px;font-weight:600}
+.src-card span{font-size:12px;color:#797e8c;line-height:1.45}
+.src-card em{font-size:11px;font-style:normal;color:#9aa0b0}
+.src-card::after{content:"";position:absolute;top:9px;right:10px;width:14px;height:14px;border:1px solid rgba(127,127,127,.45);border-radius:4px;line-height:14px;text-align:center;font-size:10px}
+.src-card.on{border-color:#7c5cff;background:rgba(124,92,255,.06);box-shadow:0 0 0 3px rgba(124,92,255,.10)}
+.src-card.on::after{content:"✓";background:#7c5cff;border-color:#7c5cff;color:#fff}
+.src-card.on em{color:#15803d}
 .preset b{font-size:13px}
 .preset span{font-size:12px;color:#797e8c;line-height:1.45}
 .preset em{font-size:11px;color:#6d4aff;font-style:normal}
@@ -92,10 +103,10 @@ export const settingsPage = `<!doctype html>
 </style></head><body>
 <section class="panel"><div class="panel-header"><div class="pg-tabs">
 <button type="button" class="pg-tab on" data-goto="source">来源</button>
-<button type="button" class="pg-tab" data-goto="search">搜索</button>
-<button type="button" class="pg-tab" data-goto="read">读取</button>
 <button type="button" class="pg-tab" data-goto="scholar">学术</button>
 <button type="button" class="pg-tab" data-goto="facts">事实</button>
+<button type="button" class="pg-tab" data-goto="search">搜索</button>
+<button type="button" class="pg-tab" data-goto="read">读取</button>
 </div><div class="pg-actions"><button class="btn" type="button" id="refresh">重新读取</button><button class="btn primary" type="submit" form="f" id="save" disabled>保存</button><span id="msg"></span></div></div>
 <div class="panel-body"><form id="f">
 
@@ -210,11 +221,15 @@ export const settingsPage = `<!doctype html>
 </div>
 <div class="pg-pair">
 <div class="pg-item"><span class="pg-label">来源（勾选即启用，按这里列出的顺序回退）</span>
-<label class="pg-check"><input type="checkbox" class="scholar-src" value="arxiv"><span class="pg-label">arXiv — 预印本，全文免费，只有 XML</span></label>
-<label class="pg-check"><input type="checkbox" class="scholar-src" value="openalex"><span class="pg-label">OpenAlex — 覆盖面最广，带被引数</span></label>
-<label class="pg-check"><input type="checkbox" class="scholar-src" value="crossref"><span class="pg-label">Crossref — 期刊注册库，DOI 最全</span></label>
-<label class="pg-check"><input type="checkbox" class="scholar-src" value="semanticscholar"><span class="pg-label">Semantic Scholar — 无 Key 时常报 429</span></label>
+<div class="src-grid">
+<label class="src-card"><input type="checkbox" class="scholar-src" value="arxiv"><b>arXiv</b><span>预印本，全文免费，只有 XML</span><em class="src-flag">未启用</em></label>
+<label class="src-card"><input type="checkbox" class="scholar-src" value="openalex"><b>OpenAlex</b><span>覆盖面最广，带被引数</span><em class="src-flag">未启用</em></label>
+<label class="src-card"><input type="checkbox" class="scholar-src" value="crossref"><b>Crossref</b><span>期刊注册库，DOI 最全</span><em class="src-flag">未启用</em></label>
+<label class="src-card"><input type="checkbox" class="scholar-src" value="semanticscholar"><b>Semantic Scholar</b><span>无 Key 时常报 429</span><em class="src-flag">未启用</em></label>
+</div>
 <p class="pg-hint">前一个连不上才换下一个；连上但零条算应答，会记进回退链再试下一个。四个都不需要 Key。想临时换顺序或只查某一个，用工具参数 sources。</p></div>
+</div>
+<div class="pg-pair">
 <div class="pg-item"><span class="pg-label">试一下</span>
 <div class="pg-item"><select id="scholarSrcSel"><option value="arxiv">arXiv</option><option value="openalex">OpenAlex</option><option value="crossref">Crossref</option><option value="semanticscholar">Semantic Scholar</option></select>
 <input type="text" id="scholarQuery" placeholder="检索词，例如 transformer attention"></div>
@@ -235,11 +250,15 @@ export const settingsPage = `<!doctype html>
 </div>
 <div class="pg-pair">
 <div class="pg-item"><span class="pg-label">来源（勾选即启用，按这里列出的顺序回退）</span>
-<label class="pg-check"><input type="checkbox" class="fact-src" value="wikipedia"><span class="pg-label">维基百科 — 条目搜索，带摘要</span></label>
-<label class="pg-check"><input type="checkbox" class="fact-src" value="wikidata"><span class="pg-label">维基数据 — 实体、编号、一句描述</span></label>
-<label class="pg-check"><input type="checkbox" class="fact-src" value="openlibrary"><span class="pg-label">OpenLibrary — 图书、作者、首版年</span></label>
-<label class="pg-check"><input type="checkbox" class="fact-src" value="oeis"><span class="pg-label">OEIS — 整数数列，输入例如 1,2,3,6,11</span></label>
+<div class="src-grid">
+<label class="src-card"><input type="checkbox" class="fact-src" value="wikipedia"><b>维基百科</b><span>条目搜索，带摘要</span><em class="src-flag">未启用</em></label>
+<label class="src-card"><input type="checkbox" class="fact-src" value="wikidata"><b>维基数据</b><span>实体、编号、一句描述</span><em class="src-flag">未启用</em></label>
+<label class="src-card"><input type="checkbox" class="fact-src" value="openlibrary"><b>OpenLibrary</b><span>图书、作者、首版年</span><em class="src-flag">未启用</em></label>
+<label class="src-card"><input type="checkbox" class="fact-src" value="oeis"><b>OEIS</b><span>整数数列，输入例如 1,2,3,6,11</span><em class="src-flag">未启用</em></label>
+</div>
 <p class="pg-hint">前一个连不上才换下一个；连上但零条算应答，会记进回退链再试下一个。四家都不需要 Key。</p></div>
+</div>
+<div class="pg-pair">
 <div class="pg-item"><span class="pg-label">试一下</span>
 <div class="pg-item"><select id="factSrcSel"><option value="wikipedia">维基百科</option><option value="wikidata">维基数据</option><option value="openlibrary">OpenLibrary</option><option value="oeis">OEIS</option></select>
 <input type="text" id="factQuery" placeholder="查询词，例如 Brisbane"></div>
@@ -269,6 +288,19 @@ function hasKeyFor(name) {
   if (name === "exa") return hasExaKey;
   return true;
 }
+function syncSrcCards() {
+  for (const card of document.querySelectorAll(".src-card")) {
+    const box = card.querySelector("input[type=checkbox]");
+    if (!box) continue;
+    card.classList.toggle("on", box.checked);
+    const flag = card.querySelector(".src-flag");
+    if (flag) flag.textContent = box.checked ? "已启用" : "未启用";
+  }
+}
+document.addEventListener("change", (event) => {
+  const tag = event.target;
+  if (tag && tag.matches && tag.matches(".scholar-src,.fact-src")) syncSrcCards();
+});
 function renderChain() {
   const list = byId("chain");
   list.textContent = "";
@@ -682,6 +714,7 @@ function show(data) {
   byId("factsEnabled").checked = Boolean(c.factsEnabled);
   byId("factsLang").value = c.factsLang || "zh";
   for (const box of document.querySelectorAll(".fact-src")) box.checked = (c.factsSources || []).includes(box.value);
+  syncSrcCards();
   byId("save").disabled = false;
 }
 
