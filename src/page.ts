@@ -30,15 +30,18 @@ export const settingsPage = `<!doctype html>
 .pg-actions{display:flex;align-items:center;gap:12px;margin-left:auto}
 #msg{font-size:13px;color:#797e8c}
 #msg.err{color:#b91c1c}
-.chain{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:minmax(0,1fr);gap:8px}
+.chain{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+@media(max-width:1180px){.chain{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:820px){.chain{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:560px){.chain{grid-template-columns:minmax(0,1fr)}}
 .chain-row.primary{border-width:2px}
 .chain-zone{border:1px dashed #dcdfe6;border-radius:10px;padding:8px 10px;margin-top:8px}
 .chain-zone.over{border-color:#7c5cff;background:rgba(124,92,255,.04)}
 .chain-zone>.tier-tag{display:block;font-size:12px;color:#7a8090;margin-bottom:4px}
 .chain-zone>.tier-note{display:block;font-size:12px;color:#9aa0b0;margin-top:4px;font-style:normal}
-.chain-row .chain-weight{justify-self:end;font-size:12px;padding:2px 4px;max-width:92px}
-.chain-standby{display:flex;align-items:center;gap:8px;margin:-2px 0 0 16px;padding:6px 10px;border:1px dashed rgba(124,92,255,.45);border-radius:9px;background:rgba(124,92,255,.03);font-size:12px;color:#797e8c}
-.chain-standby select{font-size:12px;padding:2px 6px;max-width:200px}
+.chain-row .chain-weight{justify-self:end;font-size:12px;padding:2px 2px;max-width:74px}
+.chain-standby{grid-column:1/-1;display:flex;align-items:center;gap:6px;flex-wrap:nowrap;margin:6px 0 0;padding:5px 8px;border:1px dashed rgba(124,92,255,.45);border-radius:9px;background:rgba(124,92,255,.03);font-size:12px;color:#797e8c}
+.chain-standby select{font-size:12px;padding:2px 4px;max-width:110px;min-width:0;flex:1 1 auto}
 .chain-standby em{font-style:normal;color:#9aa0b0}
 .chain-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:6px 8px;padding:8px 10px;border:1px solid rgba(124,92,255,.45);border-radius:9px;background:rgba(124,92,255,.06);box-shadow:0 0 0 1px rgba(124,92,255,.18),0 2px 10px rgba(124,92,255,.14),0 0 16px rgba(124,92,255,.10);font-size:13px;cursor:grab}
 .chain-row:hover{box-shadow:0 0 0 1px rgba(124,92,255,.55),0 3px 14px rgba(124,92,255,.24),0 0 22px rgba(124,92,255,.20)}
@@ -432,10 +435,10 @@ function standbyChoices(name) {
 }
 /** 首位下面那条虚线：给主位配一个二级来源。 */
 function standbyRow(name) {
-  const li = document.createElement("li");
+  const li = document.createElement("div");
   li.className = "chain-standby";
   const text = document.createElement("span");
-  text.textContent = "主位没拿到结果时，用";
+  text.textContent = "没结果就用";
   const sel = document.createElement("select");
   sel.id = "chainStandby";
   const opts = standbyChoices(name);
@@ -451,6 +454,7 @@ function standbyRow(name) {
     hint.textContent = "已记下，点右上「保存」生效";
   });
   li.append(text, sel, hint);
+  li.title = "主位没拿到结果时，换这个来源再打一次";
   return li;
 }
 let tiers = {};
@@ -502,8 +506,9 @@ function renderChain() {
   one.textContent = ""; two.textContent = "";
   const first = groupsOf(1)[0];
   chain.forEach((name, index) => {
-    (tierOf(name) === 2 ? two : one).append(renderRow(name, index));
-    if (name === first) one.append(standbyRow(name));
+    const row = renderRow(name, index);
+    if (name === first) row.append(standbyRow(name));
+    (tierOf(name) === 2 ? two : one).append(row);
   });
   byId("tierNote1").textContent = groupsOf(1).length ? "" : "一级还空着，从下面拖一张进来";
   byId("tierNote2").textContent = groupsOf(2).length ? "" : "空着也行：二级只在你想要便宜兜底时才用";
@@ -550,6 +555,7 @@ TIER_BOX.addEventListener("click", (event) => {
 TIER_BOX.addEventListener("dragstart", (event) => {
   const row = event.target.closest(".chain-row");
   if (!row) return;
+  if (event.target.closest(".chain-standby")) { event.preventDefault(); return; }
   event.dataTransfer.setData("text/plain", row.dataset.name);
   event.dataTransfer.effectAllowed = "move";
   row.classList.add("drag");
@@ -568,6 +574,7 @@ TIER_BOX.addEventListener("dragover", (event) => {
 TIER_BOX.addEventListener("drop", (event) => {
   const zone = event.target.closest(".chain-zone");
   if (!zone) return;
+  if (event.target.closest(".chain-standby")) return;
   event.preventDefault();
   const name = event.dataTransfer.getData("text/plain");
   const row = event.target.closest(".chain-row");
