@@ -194,6 +194,14 @@ export class SurfRuntime implements SurfService {
       return { ok: false, ms: Math.round(performance.now() - started), detail: safe.message || safe.code };
     }
   }
+  /** 每个来源最多等多久：用户给了就按它，但不超过这次剩下的预算。 */
+  private sourceBudget(name: string, index: number, count: number, remaining: number): number {
+    const fixed = this.config.sourceTimeouts?.[name];
+    if (typeof fixed === 'number' && fixed > 0) return Math.max(1, Math.min(fixed, Math.floor(remaining)));
+    // 没有单独设过：首个来源最可能成，给剩余预算的 70%；其后的按剩余来源数均分。
+    return count === 1 ? this.config.timeoutMs
+      : Math.max(1, Math.floor(index === 0 ? remaining * 0.7 : remaining / (count - index)));
+  }
   private page(session: string, ref: unknown): StoredPage {
     const page = typeof ref === 'string' ? this.pages.get(ref) : undefined;
     if (!page || page.sessionId !== session || page.expires <= this.now()) throw new SurfError('page_unavailable');
@@ -242,9 +250,7 @@ export class SurfRuntime implements SurfService {
         const remaining = deadline - started;
         try {
           if (remaining < 1) throw new SurfError('timeout');
-          // 第一个来源最可能成，给它剩余预算的 70%；其后的按剩余来源数均分；单来源仍用整体上限。
-          const timeoutMs = providers.length === 1 ? this.config.timeoutMs
-            : Math.max(1, Math.floor(index === 0 ? remaining * 0.7 : remaining / (providers.length - index)));
+          const timeoutMs = this.sourceBudget(provider, index, providers.length, remaining);
           const limitSignal = AbortSignal.timeout(timeoutMs);
           const attemptSignal = AbortSignal.any([signal, limitSignal]);
           const results = await untilCancelled(attemptSignal, () => this.searchSource(provider, input.query.trim(), limit, attemptSignal, timeoutMs, vertical));
@@ -302,8 +308,7 @@ export class SurfRuntime implements SurfService {
         const remaining = deadline - started;
         try {
           if (remaining < 1) throw new SurfError('timeout');
-          const timeoutMs = sources.length === 1 ? this.config.timeoutMs
-            : Math.max(1, Math.floor(index === 0 ? remaining * 0.7 : remaining / (sources.length - index)));
+          const timeoutMs = this.sourceBudget(source, index, sources.length, remaining);
           const limitSignal = AbortSignal.timeout(timeoutMs);
           const attemptSignal = AbortSignal.any([signal, limitSignal]);
           const request = buildRequest(source, query, limit, this.config.scholarMailto);
@@ -368,8 +373,7 @@ export class SurfRuntime implements SurfService {
         const remaining = deadline - started;
         try {
           if (remaining < 1) throw new SurfError('timeout');
-          const timeoutMs = sources.length === 1 ? this.config.timeoutMs
-            : Math.max(1, Math.floor(index === 0 ? remaining * 0.7 : remaining / (sources.length - index)));
+          const timeoutMs = this.sourceBudget(source, index, sources.length, remaining);
           const limitSignal = AbortSignal.timeout(timeoutMs);
           const attemptSignal = AbortSignal.any([signal, limitSignal]);
           const request = buildFactRequest(source, query, limit, lang);

@@ -32,6 +32,8 @@ export interface SurfConfig {
   anysearchZone: SearchZone;
   proxyUrl: string;
   timeoutMs: number;
+  /** 每个来源单独的上限（毫秒）。没写的来源按整体预算分配。 */
+  sourceTimeouts: Record<string, number>;
   maxPageBytes: number;
   maxImageBytes: number;
   maxTextChars: number;

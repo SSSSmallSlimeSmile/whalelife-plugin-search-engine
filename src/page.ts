@@ -476,6 +476,8 @@ byId("presets").addEventListener("click", (event) => {
 const KEY_FIELD = { brave: "braveApiKey", tavily: "tavilyApiKey", exa: "exaApiKey", anysearch: "anysearchApiKey" };
 const CLEAR_FIELD = { brave: "clearBraveApiKey", tavily: "clearTavilyApiKey", exa: "clearExaApiKey", anysearch: "clearAnySearchApiKey" };
 let kpKind = "";
+/** 每源超时：key 是来源名（自定义写 custom:名字），值是毫秒。 */
+let timeouts = {};
 let kpName = "";
 const kp = document.createElement("div");
 kp.className = "keypop";
@@ -484,7 +486,8 @@ kp.innerHTML = '<div class="kp-head"><b id="kpTitle"></b><span id="kpState"></sp
   + '<p class="kp-desc" id="kpDesc"></p>'
   + '<div class="kp-body"><div id="kpKeyWrap"><input id="kpInput" type="password" autocomplete="off" spellcheck="false">'
   + '<label class="kp-check"><input id="kpClearChk" type="checkbox"><span id="kpClearLabel">清除</span></label></div></div>'
-  + '<div class="kp-actions"><button type="button" id="kpAdd" hidden>加入来源链</button><button type="button" class="primary" id="kpSave">保存</button><button type="button" id="kpCancel">取消</button></div>'
+  + '<div class="kp-body" id="kpTimeWrap"><label class="kp-check"><span>最多等多久（秒，留空按默认分配）</span><input id="kpTimeout" type="number" min="1" max="60" step="1"></label></div>'
+  + '<div class="kp-actions"><button type="button" id="kpAdd" hidden>加入来源链</button><button type="button" id="kpTimeSave" hidden>存超时</button><button type="button" class="primary" id="kpSave">保存</button><button type="button" id="kpCancel">取消</button></div>'
   + '<div class="kp-msg" id="kpMsg"></div>';
 document.body.append(kp);
 makeDraggable(kp, kp.querySelector(".kp-head"));
@@ -570,6 +573,12 @@ function openSourcePop(name, card) {
   add.hidden = false;
   add.disabled = !on && full;
   add.textContent = on ? "移出来源链" : (full ? "来源链已满" : "加入来源链");
+  const timeWrap = kp.querySelector("#kpTimeWrap");
+  const timeSave = kp.querySelector("#kpTimeSave");
+  if (timeWrap) timeWrap.hidden = false;
+  if (timeSave) timeSave.hidden = false;
+  const timeInput = kp.querySelector("#kpTimeout");
+  if (timeInput) timeInput.value = timeouts[name] ? String(timeouts[name] / 1000) : "";
   kpMsg("");
   placeKeyPop(card);
   if (hasField) input.focus({ preventScroll: true });
@@ -586,6 +595,10 @@ function openProxyPop(anchor) {
   input.placeholder = "http://127.0.0.1:7890；留空保留已有代理";
   kp.querySelector("#kpClearChk").checked = byId("clearProxy").checked;
   kp.querySelector("#kpClearLabel").textContent = "清除代理";
+  const timeWrapP = kp.querySelector("#kpTimeWrap");
+  if (timeWrapP) timeWrapP.hidden = true;
+  const timeSaveP = kp.querySelector("#kpTimeSave");
+  if (timeSaveP) timeSaveP.hidden = true;
   kpMsg("");
   placeKeyPop(anchor);
   input.focus({ preventScroll: true });
@@ -631,6 +644,16 @@ kp.querySelector("#kpAdd").onclick = () => {
     msg.textContent = "已加入：" + name + "（第 " + chain.length + " 个），记得点右上「保存」";
   }
   openSourcePop(name, document.querySelector('.preset[data-provider="' + name + '"]'));
+};
+kp.querySelector("#kpTimeSave").onclick = () => {
+  const name = kpName;
+  if (!name) return;
+  const raw = kp.querySelector("#kpTimeout").value.trim();
+  if (!raw) { delete timeouts[name]; submitPage(); return; }
+  const seconds = Number(raw);
+  if (!Number.isFinite(seconds) || seconds < 1 || seconds > 60) { kpMsg("超时填 1 到 60 秒", true); return; }
+  timeouts[name] = Math.round(seconds * 1000);
+  submitPage();
 };
 kp.querySelector("#kpCancel").onclick = closeKeyPop;
 byId("proxyOpen").onclick = () => openProxyPop(byId("proxyOpen"));
@@ -695,6 +718,7 @@ function show(data) {
   hasExaKey = Boolean(c.hasExaApiKey);
   customs = (c.customSources || []).map(item => ({ ...item }));
   chain = [...c.searchProviders];
+  timeouts = { ...(c.sourceTimeouts || {}) };
   renderChain();
   for (const id of ["resultsLimit", "concurrency", "maxTextChars", "referenceTtlSeconds"]) byId(id).value = c[id];
   byId("anysearchZone").value = c.anysearchZone;
@@ -852,6 +876,7 @@ byId("f").onsubmit = async (event) => {
   const config = {};
   for (const id of ["resultsLimit", "concurrency", "maxTextChars", "referenceTtlSeconds"]) config[id] = Number(byId(id).value);
   config.searchProviders = chain.slice();
+  config.sourceTimeouts = { ...timeouts };
   config.anysearchZone = byId("anysearchZone").value;
   config.timeoutMs = Number(byId("timeoutSeconds").value) * 1000;
   config.maxPageBytes = Number(byId("pageKiB").value) * 1024;

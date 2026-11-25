@@ -9,7 +9,7 @@ import { isFactSource } from './facts.ts';
 export const MAX_PROVIDERS = 6;
 export const defaults: SurfConfig = {
   searchProviders: ['bing'], braveApiKey: '', tavilyApiKey: '', exaApiKey: '', anysearchApiKey: '', anysearchZone: 'cn',
-  proxyUrl: '', timeoutMs: 20_000,
+  proxyUrl: '', timeoutMs: 20_000, sourceTimeouts: {},
   maxPageBytes: 2 * 1024 * 1024, maxImageBytes: 8 * 1024 * 1024,
   maxTextChars: 60_000, resultsLimit: 5, referenceTtlSeconds: 600, concurrency: 3,
   scholarEnabled: false, scholarSources: ['arxiv', 'openalex', 'crossref'], scholarMailto: '',
@@ -105,6 +105,19 @@ export function parseConfig(value: unknown): SurfConfig {
       if (!['http:', 'https:'].includes(proxy.protocol) || proxy.pathname !== '/' || proxy.search || proxy.hash || !proxy.hostname)
         throw new SurfError('config_invalid');
       result.proxyUrl = proxy.href;
+    }
+    if (input.sourceTimeouts !== undefined) {
+      const raw = input.sourceTimeouts;
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new SurfError('config_invalid');
+      const entries = Object.entries(raw as Record<string, unknown>);
+      if (entries.length > 8) throw new SurfError('config_invalid');
+      const map: Record<string, number> = {};
+      for (const [name, value] of entries) {
+        if (!isProvider(name, customs)) throw new SurfError('config_invalid');
+        if (typeof value !== 'number' || !Number.isInteger(value) || value < 1000 || value > 60_000) throw new SurfError('config_invalid');
+        map[name] = value;
+      }
+      result.sourceTimeouts = map;
     }
     for (const key of Object.keys(limits) as (keyof typeof limits)[]) {
       if (input[key] === undefined) continue;
