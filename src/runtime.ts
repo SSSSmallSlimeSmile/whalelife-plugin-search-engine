@@ -187,6 +187,8 @@ function takeCapped<T extends { dupOf?: string }>(items: T[], quota: number): { 
   return { kept, dropped: items.length - kept.length };
 }
 
+const KNOWN_PROVIDERS = new Set<string>(['anysearch', 'duckduckgo', 'brave', 'tavily', 'exa']);
+
 export class SurfRuntime implements SurfService {
   config: SurfConfig;
   private fetcher: PublicFetcher;
@@ -1021,6 +1023,9 @@ export class SurfRuntime implements SurfService {
   }
   private async searchSource(provider: SearchProvider, query: string, limit: number, signal: AbortSignal, timeoutMs: number,
     vertical: Vertical, config = this.config) {
+    // 名字必须先落在已知集合里。以前漏了这一道，传个 github/拼错的名字会静默落到 duckduckgo 那条分支上，
+    // 回执看着"通"，其实打的是另一家（探活接口尤其容易撞上）。
+    if (!KNOWN_PROVIDERS.has(provider) && !provider.startsWith('custom:')) throw new SurfError('search_unconfigured');
     if (provider === 'brave' && !config.braveApiKey) throw new SurfError('search_unconfigured');
     if (provider === 'anysearch') return this.searchAnySearch(query, limit, signal, timeoutMs, vertical, config);
     // 自定义来源：名字对不上配置就当场拒，不静默跳过（跳过等于链上少一环还看不出来）。

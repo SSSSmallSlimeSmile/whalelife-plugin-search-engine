@@ -446,8 +446,8 @@ document.addEventListener("change", (event) => {
 /** 主位能选的二级：排除自己和链上已有的（它们本来就在并发里打）。 */
 function standbyChoices(name) {
   const used = new Set(chain);
-const STANDBY_OPTIONS = ["anysearch", "duckduckgo", "brave", "tavily", "exa"];
-  return all.filter(item => item !== name && !used.has(item));
+  const options = ["anysearch", "duckduckgo", "brave", "tavily", "exa"];
+  return options.filter(item => item !== name && !used.has(item));
 }
 /** 主位那颗小标记：点开选一个回退来源。没设时显示 \u21ba，设了显示来源名。 */
 function standbyPick(name) {
