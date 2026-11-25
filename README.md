@@ -331,7 +331,7 @@ const result = await search.search({ query: 'prompt caching', limit: 5, sessionI
 
 ## 对外 HTTP 接口（可选，默认关）
 
-设置页「读取」页最下面一栏填一个令牌就开，清空就关。令牌 16–128 位，字母数字加 `-` `_`。
+设置页「读取」页最下面一栏填一个令牌就开；要关就勾上「清掉已设的令牌」再保存。令牌 16–128 位，字母数字加 `-` `_`。保存之后页面不再显示明文，只显示「已设置」——留空表示沿用原值。
 
 ```sh
 # 1. 先拿宿主登录 cookie（网页没设访问密码时下面这条就行）
@@ -343,8 +343,10 @@ curl -X POST http://127.0.0.1:9270/plugins/search-engine/api \
   -H "Content-Type: application/json" \
   -H "x-search-token: 你的令牌" \
   -H "Cookie: whale=…" \
-  -d "{\"tool\":\"search\",\"query\":\"prompt caching\",\"limit\":5}"
+  -d "{\"tool\":\"search\",\"client\":\"my-script\",\"query\":\"prompt caching\",\"limit\":5}"
 ```
+
+`client` 可选，1–32 位字母数字加 `-` `_`，缺省 `default`。它决定翻页结果集归谁：两个程序各用各的 `client`，互相拿不到对方的 `setId`。
 
 `tool` 有四个：
 
@@ -355,13 +357,27 @@ curl -X POST http://127.0.0.1:9270/plugins/search-engine/api \
 | `facts` | query / limit / sources / lang | 同 `search_facts` |
 | `status` | 无 | 同 `search_status` |
 
+请求必须是 `Content-Type: application/json`，否则 `400 invalid_input`。
+
 状态码：没设令牌 `403 api_disabled`，令牌不对 `401 api_unauthorized`，参数不对 `400`，成功 `200`。
 
 **不开放 `read`。** 它能读任意 URL，等于把 SSRF 的出口借出去，所以 `tool:"read"` 一律 400。要读网页，就在插件里调服务。
 
-**边界**：令牌明文存在 `data/config.json`，页面上能看能改；谁拿到都能花你的额度（AnySearch、Exa 都是计费的），别贴进公开仓库。也不隔离会话——所有调用都归到 `api-client` 名下，页面引用和图片引用对它无效。
+**边界**：令牌明文存在 `data/config.json`（文件里是明文，接口和页面都不再回传它）；谁拿到都能花你的额度（AnySearch、Exa 都是计费的），别贴进公开仓库。对外调用不带页面引用和图片引用——那些要宿主会话上下文。
 
-实测（2026-11-26，真宿主 9270）：未设令牌 403、错令牌 401、无令牌 401、对令牌 status 200、search 200（groups 2 段、带 setId，翻页 shown 5 / available 11 / hasMore true）、facts 200（5 条）、`tool:"read"` 400、清空令牌后再调 403。
+**缓存与翻页**：命中结果缓存时回执里没有 `setId`，`notes` 会写一句「这份来自缓存，没有翻页句柄」。原因是缓存里那份 setId 属于上一次的会话与进度，递出来要么翻不动、要么翻到别人的。要多给几条就重新搜索，或者把上一次真拿到的 `setId` 传进 `more`。
+
+实测（2026-11-26，真宿主 9270）：
+
+```
+未设令牌 / 无令牌 / 错令牌     403 api_disabled · 401 api_unauthorized · 401
+对令牌 search                 200  setId=set_5cb73cc4-…  shown=3
+同查询再发                    200  cached=true  setId 不出现
+client=bob 借 client=alice 的 setId   200  error.code=page_unavailable
+client=alice 自己翻                    200  shown=3
+client="a b"（含空格）         400 invalid_input
+GET /config 里找令牌明文        0 处，只有 hasApiToken
+```
 
 ## 内容与能力边界
 

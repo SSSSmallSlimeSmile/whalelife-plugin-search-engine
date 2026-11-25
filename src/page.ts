@@ -260,7 +260,7 @@ export const settingsPage = `<!doctype html>
 <span class="pg-check"><input id="structuredRead" type="checkbox" name="structuredRead"><span class="pg-label">命中 GitHub / Stack Exchange / arXiv / 维基百科时改走公开 API</span></span>
 <p class="pg-hint">取的是结构化字段，不是页面快照：GitHub 的 issue / PR / release 会拆出状态、标签、正文和评论；Stack Exchange 的回答按票数排、已采纳的排在前面；arXiv 取元数据与摘要；维基百科取纯文本正文。这几个接口都不需要 Key。解析没成会回落成普通抓取，回执里写明原因。</p></div>
 <div class="pg-item" style="margin-top:16px"><span class="pg-label">对外接口</span>
-<p class="pg-hint" style="margin-top:0">别的程序（脚本、别的 agent）可以按令牌调 search / scholar / facts / status。不开放“读网页”——那等于把任意 URL 的出口借出去。令牌空着就是不开放，填了立刻生效，清空立刻关。</p></div>
+<p class="pg-hint" style="margin-top:0">别的程序（脚本、别的 agent）可以按令牌调 search / scholar / facts / status。不开放“读网页”——那等于把任意 URL 的出口借出去。令牌空着就是不开放，填了保存后立刻生效；要关就勾「清掉已设的令牌」再保存。保存后页面不再显示明文。</p></div>
 <div class="pg-pair">
 <div class="pg-item"><label class="pg-row"><span class="pg-label">令牌（16–128 位字母数字）</span><input type="text" name="apiToken" id="apiToken" autocomplete="off" placeholder="留空 = 不开放"></label>
 <p class="pg-hint">存盘后页面不再显示明文，只显示「已设置」。谁拿到都能花你的额度，勾下面那个再保存即可关闭。</p>
