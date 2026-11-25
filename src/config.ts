@@ -3,8 +3,9 @@
  * Additional terms under AGPLv3 Section 7: see LICENSE-ADDITIONAL.
  */
 import { SurfError } from './errors.ts';
-import type { CustomSource, PublicConfig, ScholarSource, SearchProvider, SearchZone, SurfConfig } from './types.ts';
+import type { CustomSource, FactSource, PublicConfig, ScholarSource, SearchProvider, SearchZone, SurfConfig } from './types.ts';
 import { isScholarSource } from './scholar.ts';
+import { isFactSource } from './facts.ts';
 export const MAX_PROVIDERS = 6;
 export const defaults: SurfConfig = {
   searchProviders: ['bing'], braveApiKey: '', tavilyApiKey: '', exaApiKey: '', anysearchApiKey: '', anysearchZone: 'cn',
@@ -12,6 +13,7 @@ export const defaults: SurfConfig = {
   maxPageBytes: 2 * 1024 * 1024, maxImageBytes: 8 * 1024 * 1024,
   maxTextChars: 60_000, resultsLimit: 5, referenceTtlSeconds: 600, concurrency: 3,
   scholarEnabled: false, scholarSources: ['arxiv', 'openalex', 'crossref'], scholarMailto: '',
+  factsEnabled: false, factsSources: ['wikipedia', 'wikidata', 'openlibrary', 'oeis'], factsLang: 'zh',
   customSources: [],
 };
 export function object(input: unknown): Record<string, unknown> {
@@ -126,6 +128,20 @@ export function parseConfig(value: unknown): SurfConfig {
           (mail !== '' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)))
         throw new SurfError('config_invalid');
       result.scholarMailto = mail;
+    }
+    if (input.factsEnabled !== undefined) {
+      if (typeof input.factsEnabled !== 'boolean') throw new SurfError('config_invalid');
+      result.factsEnabled = input.factsEnabled;
+    }
+    if (input.factsSources !== undefined) {
+      const list = input.factsSources;
+      if (!Array.isArray(list) || list.length === 0 || list.length > 4 || !list.every(isFactSource) ||
+          new Set(list).size !== list.length) throw new SurfError('config_invalid');
+      result.factsSources = [...(list as FactSource[])];
+    }
+    if (input.factsLang !== undefined) {
+      if (input.factsLang !== 'zh' && input.factsLang !== 'en') throw new SurfError('config_invalid');
+      result.factsLang = input.factsLang;
     }
     return result;
   } catch { throw new SurfError('config_invalid'); }

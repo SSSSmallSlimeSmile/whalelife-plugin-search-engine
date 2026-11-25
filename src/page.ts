@@ -95,6 +95,7 @@ export const settingsPage = `<!doctype html>
 <button type="button" class="pg-tab" data-goto="search">搜索</button>
 <button type="button" class="pg-tab" data-goto="read">读取</button>
 <button type="button" class="pg-tab" data-goto="scholar">学术</button>
+<button type="button" class="pg-tab" data-goto="facts">事实</button>
 </div><div class="pg-actions"><button class="btn" type="button" id="refresh">重新读取</button><button class="btn primary" type="submit" form="f" id="save" disabled>保存</button><span id="msg"></span></div></div>
 <div class="panel-body"><form id="f">
 
@@ -222,6 +223,30 @@ export const settingsPage = `<!doctype html>
 </div>
 </section>
 
+
+<section class="pg-group" id="pg-facts" hidden>
+<p class="pg-desc">事实查询是另一个工具 search_facts，默认不注册：关着时它不在工具表里，不占每轮上下文。它查的是「条目」——这个东西叫什么、编号是多少，不是网页全文检索，所以不并进上面的来源链。</p>
+<div class="pg-pair">
+<div class="pg-item"><span class="pg-label">开关</span>
+<span class="pg-check"><input id="factsEnabled" type="checkbox" name="factsEnabled"><span class="pg-label">启用 search_facts 工具</span></span>
+<p class="pg-hint">四家都是公开 API，不需要 Key。关着时模型看不到这个工具。</p></div>
+<div class="pg-item"><label class="pg-row"><span class="pg-label">语言</span><select id="factsLang" name="factsLang"><option value="zh">中文</option><option value="en">英文</option></select></label>
+<p class="pg-hint">只影响维基百科和维基数据的检索语言；OpenLibrary 和 OEIS 只有英文。</p></div>
+</div>
+<div class="pg-pair">
+<div class="pg-item"><span class="pg-label">来源（勾选即启用，按这里列出的顺序回退）</span>
+<label class="pg-check"><input type="checkbox" class="fact-src" value="wikipedia"><span class="pg-label">维基百科 — 条目搜索，带摘要</span></label>
+<label class="pg-check"><input type="checkbox" class="fact-src" value="wikidata"><span class="pg-label">维基数据 — 实体、编号、一句描述</span></label>
+<label class="pg-check"><input type="checkbox" class="fact-src" value="openlibrary"><span class="pg-label">OpenLibrary — 图书、作者、首版年</span></label>
+<label class="pg-check"><input type="checkbox" class="fact-src" value="oeis"><span class="pg-label">OEIS — 整数数列，输入例如 1,2,3,6,11</span></label>
+<p class="pg-hint">前一个连不上才换下一个；连上但零条算应答，会记进回退链再试下一个。四家都不需要 Key。</p></div>
+<div class="pg-item"><span class="pg-label">试一下</span>
+<div class="pg-item"><select id="factSrcSel"><option value="wikipedia">维基百科</option><option value="wikidata">维基数据</option><option value="openlibrary">OpenLibrary</option><option value="oeis">OEIS</option></select>
+<input type="text" id="factQuery" placeholder="查询词，例如 Brisbane"></div>
+<button class="btn" type="button" id="factProbe">试一下</button> <span class="chain-msg" id="factMsg"></span>
+<p class="pg-hint">只直连选中的那个来源一次，不改配置。语言取上面那一栏当前的值。</p></div>
+</div>
+</section>
 </form></div></section>
 <script>
 const byId = (id) => document.getElementById(id);
@@ -654,6 +679,9 @@ function show(data) {
   byId("scholarEnabled").checked = Boolean(c.scholarEnabled);
   byId("scholarMailto").value = c.scholarMailto || "";
   for (const box of document.querySelectorAll(".scholar-src")) box.checked = (c.scholarSources || []).includes(box.value);
+  byId("factsEnabled").checked = Boolean(c.factsEnabled);
+  byId("factsLang").value = c.factsLang || "zh";
+  for (const box of document.querySelectorAll(".fact-src")) box.checked = (c.factsSources || []).includes(box.value);
   byId("save").disabled = false;
 }
 
@@ -771,6 +799,21 @@ byId("scholarProbe").onclick = async () => {
   }
 };
 
+byId("factProbe").onclick = async () => {
+  const msg = byId("factMsg");
+  msg.className = "chain-msg";
+  msg.textContent = "请求中…";
+  try {
+    const res = await fetch("/plugins/search-engine/fact-probe", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source: byId("factSrcSel").value, lang: byId("factsLang").value, query: byId("factQuery").value.trim() || undefined }) });
+    const data = await res.json().catch(() => ({}));
+    msg.className = data.ok ? "chain-msg" : "chain-msg err";
+    msg.textContent = data.ok ? ("通 " + data.ms + " ms · " + data.detail) : ("没通 " + data.ms + " ms · " + data.detail);
+  } catch (error) {
+    msg.className = "chain-msg err";
+    msg.textContent = "没通 · " + (error && error.message ? error.message : error);
+  }
+};
 byId("f").onsubmit = async (event) => {
   event.preventDefault();
   const config = {};
@@ -787,6 +830,10 @@ byId("f").onsubmit = async (event) => {
   config.scholarEnabled = byId("scholarEnabled").checked;
   config.scholarMailto = byId("scholarMailto").value.trim();
   config.scholarSources = [...document.querySelectorAll(".scholar-src")].filter(box => box.checked).map(box => box.value);
+  config.factsEnabled = byId("factsEnabled").checked;
+  config.factsLang = byId("factsLang").value;
+  config.factsSources = [...document.querySelectorAll(".fact-src")].filter(box => box.checked).map(box => box.value);
+  if (config.factsSources.length === 0) { byId("msg").className = "err"; byId("msg").textContent = "事实来源至少勾一个"; return; }
   if (config.scholarSources.length === 0) { byId("msg").className = "err"; byId("msg").textContent = "学术来源至少勾一个"; return; }
   byId("save").disabled = true;
   byId("msg").className = "";

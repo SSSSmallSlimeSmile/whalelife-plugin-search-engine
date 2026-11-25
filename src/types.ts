@@ -42,6 +42,10 @@ export interface SurfConfig {
   scholarEnabled: boolean;
   scholarSources: ScholarSource[];
   scholarMailto: string;
+  /** 事实查询（维基/维基数据/OpenLibrary/OEIS）：同样默认不注册工具。 */
+  factsEnabled: boolean;
+  factsSources: FactSource[];
+  factsLang: 'zh' | 'en';
   /** 自定义 JSON 来源，只有用户自己加过才有。 */
   customSources: CustomSource[];
 }
@@ -103,6 +107,23 @@ export interface ScholarData {
   fallback?: SearchFailure[];
   notes?: string[];
 }
+export type FactSource = 'wikipedia' | 'wikidata' | 'openlibrary' | 'oeis';
+export interface FactInput {
+  query: string; limit?: number;
+  /** 只查其中几个来源，按给定顺序；不传就用设置里的顺序。 */
+  sources?: FactSource[];
+  /** 维基语言：zh / en，不传按设置里的 zone 决定。 */
+  lang?: 'zh' | 'en';
+}
+export interface FactItem {
+  source: FactSource; title: string; url: string; snippet: string; meta?: string;
+}
+export interface FactFailure { source: FactSource; elapsedMs: number; code: string; reason: string }
+export interface FactData {
+  source: string; items: FactItem[]; untrusted: true; elapsedMs: number;
+  fallback?: FactFailure[];
+  notes?: string[];
+}
 export interface SearchFailure { provider: SearchProvider; elapsedMs: number; code: string; reason: string }
 export interface SearchData {
   provider: string; results: SearchItem[]; untrusted: true; elapsedMs: number;
@@ -124,6 +145,7 @@ export interface SurfService {
   settings(): PublicConfig;
   search(input: SearchInput & { sessionId: string }, options?: CallOptions): Promise<OperationResult<SearchData>>;
   scholar(input: ScholarInput & { sessionId: string }, options?: CallOptions): Promise<OperationResult<ScholarData>>;
+  facts(input: FactInput & { sessionId: string }, options?: CallOptions): Promise<OperationResult<FactData>>;
   read(input: ReadInput & { sessionId: string }, options?: CallOptions): Promise<OperationResult<PageData>>;
   image(input: ImageInput & { sessionId: string }, options?: CallOptions): Promise<OperationResult<ImageData>>;
   prepareCollection(input: ImageInput & { sessionId: string }, options?: CallOptions): Promise<OperationResult<GalleryImageData>>;

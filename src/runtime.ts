@@ -11,9 +11,11 @@ import { isJsonSource, buildJsonRequest, parseJsonSearch } from './jsonsources.t
 import { buildCustomRequest, parseCustom, guessJsonShape } from './custom.ts';
 import type { JsonShapeGuess } from './custom.ts';
 import { buildRequest, parseScholar, isScholarSource } from './scholar.ts';
+import { buildFactRequest, parseFact, isFactSource } from './facts.ts';
 import type { PublicFetcher, SurfConfig, SurfService, SurfStatus, OperationResult, ParsedPage,
   SearchData, SearchFailure, SearchProvider, SearchZone, PageData, ImageData, GalleryImageData, SearchInput, ReadInput, ImageInput, CallOptions, VisionService, GalleryService,
-  ScholarData, ScholarInput, ScholarItem } from './types.ts';
+  ScholarData, ScholarInput, ScholarItem,
+  FactData, FactInput, FactFailure, FactItem } from './types.ts';
 
 type StoredPage = ParsedPage & { sessionId: string; url: string; expires: number };
 type StoredOffer = { sessionId: string; binding: OptionalService<VisionService>; media: ImageData; expires: number };
@@ -337,6 +339,91 @@ export class SurfRuntime implements SurfService {
       throw new SearchExhaustedError(answered && answeredCode ? answeredCode : sources.length === 1 ? lastCode : 'search_exhausted',
         fallback.map(item => item.provider + ' (' + item.elapsedMs + ' ms): ' + item.reason).join(' '));
     });
+  }
+  /** 事实查询：维基/维基数据/OpenLibrary/OEIS，顺序回退，零条算应答。 */
+  facts(input: FactInput & { sessionId: string }, options?: CallOptions): Promise<OperationResult<FactData>> {
+    return this.execute(input?.sessionId, options, async (_session, signal) => {
+      object(input);
+      if (!this.config.factsEnabled) throw new SurfError('search_unconfigured');
+      const query = typeof input.query === 'string' ? input.query.trim() : '';
+      if (!query || query.length > 300 || /[\x00-\x1f\x7f]/.test(query)) throw new SurfError('invalid_input');
+      const limit = input.limit ?? this.config.resultsLimit;
+      if (!Number.isInteger(limit) || limit < 1 || limit > 10) throw new SurfError('invalid_input');
+      const lang = input.lang === 'zh' || input.lang === 'en' ? input.lang : this.config.factsLang;
+      let sources = this.config.factsSources;
+      if (input.sources !== undefined) {
+        const list = input.sources;
+        if (!Array.isArray(list) || list.length === 0 || list.length > 4 || !list.every(isFactSource) ||
+            new Set(list).size !== list.length) throw new SurfError('invalid_input');
+        sources = [...list];
+      }
+      const deadline = performance.now() + this.config.timeoutMs;
+      const fallback: FactFailure[] = [];
+      let lastCode: ReturnType<typeof safeError>['code'] = 'search_exhausted';
+      let answered = false;
+      let answeredCode: 'search_empty' | undefined;
+      for (const [index, source] of sources.entries()) {
+        if (signal.aborted) throw new SurfError('cancelled');
+        const started = performance.now();
+        const remaining = deadline - started;
+        try {
+          if (remaining < 1) throw new SurfError('timeout');
+          const timeoutMs = sources.length === 1 ? this.config.timeoutMs
+            : Math.max(1, Math.floor(index === 0 ? remaining * 0.7 : remaining / (sources.length - index)));
+          const limitSignal = AbortSignal.timeout(timeoutMs);
+          const attemptSignal = AbortSignal.any([signal, limitSignal]);
+          const request = buildFactRequest(source, query, limit, lang);
+          const items: FactItem[] = await untilCancelled(attemptSignal, async () => {
+            const response = await this.fetcher.get(request.url, { signal: attemptSignal, timeoutMs,
+              maxBytes: this.config.maxPageBytes, proxyUrl: this.config.proxyUrl, allowRedirects: true,
+              headers: request.headers });
+            checkResponse(response.status);
+            return parseFact(source, response.body, limit, lang);
+          });
+          if (limitSignal.aborted || (sources.length > 1 && performance.now() > deadline)) throw new SurfError('timeout');
+          answered = true;
+          if (items.length === 0) {
+            answeredCode = 'search_empty';
+            fallback.push({ source, elapsedMs: Math.round(performance.now() - started), code: 'search_empty',
+              reason: '来源返回零条结果。' });
+            continue;
+          }
+          return { source, items, untrusted: true as const, elapsedMs: Math.round(performance.now() - started),
+            ...(fallback.length ? { fallback } : {}) };
+        } catch (error) {
+          if (signal.aborted) throw new SurfError('cancelled');
+          const failure = safeError(error);
+          lastCode = failure.code;
+          fallback.push({ source, elapsedMs: Math.round(performance.now() - started), code: failure.code, reason: failure.message });
+        }
+      }
+      throw new SearchExhaustedError(answered && answeredCode ? answeredCode : sources.length === 1 ? lastCode : 'search_exhausted',
+        fallback.map(item => item.source + ' (' + item.elapsedMs + ' ms): ' + item.reason).join(' '));
+    });
+  }
+  /** 设置页「试一下」用：只打一个事实源，不写配置、不进回执。 */
+  async probeFact(input: { source?: string; query?: string; lang?: string }): Promise<{ ok: boolean; ms: number; detail: string }> {
+    const started = performance.now();
+    try {
+      if (this.stopped || this.signal.aborted) throw new SurfError('stopped');
+      const source = isFactSource(input.source) ? input.source : this.config.factsSources[0];
+      const lang = input.lang === 'en' ? 'en' : this.config.factsLang;
+      const budget = Math.min(this.config.timeoutMs, 15_000);
+      const signal = AbortSignal.any([this.signal, AbortSignal.timeout(budget)]);
+      const query = typeof input.query === 'string' && input.query.trim() ? input.query.trim().slice(0, 200) : 'Brisbane';
+      const request = buildFactRequest(source, query, 3, lang);
+      const items = await untilCancelled(signal, async () => {
+        const response = await this.fetcher.get(request.url, { signal, timeoutMs: budget,
+          maxBytes: this.config.maxPageBytes, proxyUrl: this.config.proxyUrl, allowRedirects: true, headers: request.headers });
+        checkResponse(response.status);
+        return parseFact(source, response.body, 3, lang);
+      });
+      const sample = items[0]?.title ? ' 首条：' + items[0].title.slice(0, 60) : '';
+      return { ok: true, ms: Math.round(performance.now() - started), detail: items.length + ' 条结果' + sample };
+    } catch (error) {
+      const safe = safeError(error);
+      return { ok: false, ms: Math.round(performance.now() - started), detail: safe.message || safe.code };
+    }
   }
   /** 设置页「试一下」用：只打一个学术来源，不写配置、不进回执。 */
   async probeScholar(input: { source?: string; query?: string }): Promise<{ ok: boolean; ms: number; detail: string }> {
