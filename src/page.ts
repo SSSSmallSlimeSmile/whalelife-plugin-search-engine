@@ -36,11 +36,11 @@ export const settingsPage = `<!doctype html>
 .chain-zone.over{border-color:#7c5cff;background:rgba(124,92,255,.04)}
 .chain-zone>.tier-tag{display:block;font-size:12px;color:#7a8090;margin-bottom:4px}
 .chain-zone>.tier-note{display:block;font-size:12px;color:#9aa0b0;margin-top:4px;font-style:normal}
-.chain-row .chain-weight{font-size:12px;padding:2px 4px;max-width:92px}
+.chain-row .chain-weight{justify-self:end;font-size:12px;padding:2px 4px;max-width:92px}
 .chain-standby{display:flex;align-items:center;gap:8px;margin:-2px 0 0 16px;padding:6px 10px;border:1px dashed rgba(124,92,255,.45);border-radius:9px;background:rgba(124,92,255,.03);font-size:12px;color:#797e8c}
 .chain-standby select{font-size:12px;padding:2px 6px;max-width:200px}
 .chain-standby em{font-style:normal;color:#9aa0b0}
-.chain-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:6px 8px;padding:8px 10px;border:1px solid rgba(124,92,255,.45);border-radius:9px;background:rgba(124,92,255,.06);box-shadow:0 0 0 1px rgba(124,92,255,.18),0 2px 10px rgba(124,92,255,.14),0 0 16px rgba(124,92,255,.10);font-size:13px;cursor:grab}
+.chain-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:6px 8px;padding:8px 10px;border:1px solid rgba(124,92,255,.45);border-radius:9px;background:rgba(124,92,255,.06);box-shadow:0 0 0 1px rgba(124,92,255,.18),0 2px 10px rgba(124,92,255,.14),0 0 16px rgba(124,92,255,.10);font-size:13px;cursor:grab}
 .chain-row:hover{box-shadow:0 0 0 1px rgba(124,92,255,.55),0 3px 14px rgba(124,92,255,.24),0 0 22px rgba(124,92,255,.20)}
 .chain-row.drag{opacity:.45}
 .chain-row.over{border-color:#7c5cff;box-shadow:0 0 0 3px rgba(124,92,255,.3),0 0 22px rgba(124,92,255,.26)}
@@ -493,7 +493,7 @@ function renderRow(name, index) {
   btns.append(mk("\u2191", "up", at === 0), mk("\u2193", "down", at === list.length - 1),
     mk("\u5220\u9664", "del", chain.length <= 1), mk("\u8bd5\u4e00\u4e0b", "probe", false));
   const msg = document.createElement("span"); msg.className = "chain-msg"; btns.append(msg);
-  row.append(grip, label, order, weight, btns);
+  row.append(grip, label, weight, order, btns);
   return row;
 }
 function renderChain() {
