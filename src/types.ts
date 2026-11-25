@@ -36,6 +36,8 @@ export interface SurfConfig {
   sourceTimeouts: Record<string, number>;
   /** 成功结果的缓存秒数，0 = 不缓存。三种搜索共用这个值。 */
   cacheSeconds: number;
+  sourceFailThreshold: number;
+  sourceCooldownSeconds: number;
   maxPageBytes: number;
   maxImageBytes: number;
   maxTextChars: number;

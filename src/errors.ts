@@ -9,6 +9,7 @@ export const messages = {
   access_blocked: '来源要求验证、登录或限制访问；未绕过限制。', http_error: '来源未返回成功响应。',
   unsupported_content: '首版只支持 HTML、纯文字和图片，不执行网页脚本或读取视频。',
   search_empty: '来源返回零条结果。', search_exhausted: '配置的搜索来源均未返回有效结果。',
+  source_cooling: '来源刚连续失败过，冷却中，这次跳过。',
   search_parse: '未能识别搜索结果，来源页面可能已变化。', search_unconfigured: '所选搜索服务尚未配置。',
   page_unavailable: '页面引用不可用，请在当前会话重新读取。', session_required: '缺少可信当前会话。',
   vision_unavailable: '视觉服务不可用；文字阅读仍可使用。', gallery_unavailable: '图库服务不可用；文字阅读和已有看图能力仍可使用。',

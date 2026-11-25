@@ -202,6 +202,10 @@ export const settingsPage = `<!doctype html>
 <div class="pg-item"><span class="pg-label">命中时会看到什么</span><p class="pg-hint" style="margin-top:0">回执里带 cached: true 和 cachedAgoMs：这次没发请求，结果是 N 毫秒前那次拿到的。来源链、Key、代理一改，缓存整表清空。</p></div>
 </div>
 <div class="pg-pair">
+<div class="pg-item"><label class="pg-row"><span class="pg-label">连续失败几次进冷却</span><input type="number" name="sourceFailThreshold" id="sourceFailThreshold" min="1" max="10" required></label><p class="pg-hint">同一个来源连续失败这么多次，就把它暂时从链上放过；成功一次就清零。只算真失败（超时、HTTP 错误、解析失败），"连上但零条"算应答，不记账。上限 10。</p></div>
+<div class="pg-item"><label class="pg-row"><span class="pg-label">冷却多少秒</span><input type="number" name="sourceCooldownSeconds" id="sourceCooldownSeconds" min="0" max="600" required></label><p class="pg-hint">冷却期内这个来源会被跳过，回执里记 source_cooling 和还剩几秒，不再拿预算去撞同一堵墙。0 = 不冷却。上限 600。<b>链上所有来源都在冷却时会硬打一遍</b>——宁可慢一次，也不让搜索空手回去。</p></div>
+</div>
+<div class="pg-pair">
 <div class="pg-item"><span class="pg-label">垂直搜索参数</span>
 <p class="pg-hint" style="margin-top:0">tag 走 AnySearch 的垂直频道，多数还要配 params。实测可用的两组：tag=finance.quote + params { type: 'stock' }；tag=security.vuln + params { type: 'cve', value: 'CVE-2024-3094' }。zone 是 cn / intl，language 例如 zh-CN、en。这些都按次传入，这里不设默认值；不传 zone 就用上面那个区域。</p></div>
 </div>
@@ -783,7 +787,7 @@ function show(data) {
   chain = [...c.searchProviders];
   timeouts = { ...(c.sourceTimeouts || {}) };
   renderChain();
-  for (const id of ["resultsLimit", "resultsMaxChars", "concurrency", "maxTextChars", "referenceTtlSeconds", "cacheSeconds"]) byId(id).value = c[id];
+  for (const id of ["resultsLimit", "resultsMaxChars", "concurrency", "maxTextChars", "referenceTtlSeconds", "cacheSeconds", "sourceFailThreshold", "sourceCooldownSeconds"]) byId(id).value = c[id];
   byId("anysearchZone").value = c.anysearchZone;
   byId("timeoutSeconds").value = c.timeoutMs / 1000;
   byId("pageKiB").value = c.maxPageBytes / 1024;
@@ -939,7 +943,7 @@ byId("factProbe").onclick = async () => {
 byId("f").onsubmit = async (event) => {
   event.preventDefault();
   const config = {};
-  for (const id of ["resultsLimit", "resultsMaxChars", "concurrency", "maxTextChars", "referenceTtlSeconds", "cacheSeconds"]) config[id] = Number(byId(id).value);
+  for (const id of ["resultsLimit", "resultsMaxChars", "concurrency", "maxTextChars", "referenceTtlSeconds", "cacheSeconds", "sourceFailThreshold", "sourceCooldownSeconds"]) config[id] = Number(byId(id).value);
   config.searchProviders = chain.slice();
   config.sourceTimeouts = { ...timeouts };
   config.anysearchZone = byId("anysearchZone").value;

@@ -142,6 +142,7 @@ export class SurfRuntime implements SurfService {
     this.config = structuredClone(next);
     this.configValid = true;
     this.cache.clear();
+    this.health.clear();
   }
   setVision(binding: OptionalService<VisionService> | undefined) {
     if (this.vision !== binding) this.offers.clear();
@@ -253,6 +254,24 @@ export class SurfRuntime implements SurfService {
       return { ok: false, ms: Math.round(performance.now() - started), detail: safe.message || safe.code };
     }
   }
+  /** 来源健康度：连续失败到阈值就进冷却，免得每次都拿预算去撞同一堵墙。 */
+  private health = new Map<string, { fails: number; until: number; lastCode: string }>();
+  private coolingLeft(name: string): number {
+    const item = this.health.get(name);
+    if (!item || item.until <= this.now()) return 0;
+    return Math.max(1, Math.ceil((item.until - this.now()) / 1000));
+  }
+  private noteSourceFailure(config: SurfConfig, name: string, code: string): void {
+    if (config.sourceCooldownSeconds <= 0) return;
+    const item = this.health.get(name) ?? { fails: 0, until: 0, lastCode: '' };
+    item.fails += 1;
+    item.lastCode = code;
+    if (item.fails >= config.sourceFailThreshold) item.until = this.now() + config.sourceCooldownSeconds * 1000;
+    this.health.set(name, item);
+  }
+  private noteSourceSuccess(name: string): void {
+    this.health.delete(name);
+  }
   /** 每个来源最多等多久：用户给了就按它，但不超过这次剩下的预算。 */
   private sourceBudget(config: SurfConfig, name: string, index: number, count: number, remaining: number): number {
     const fixed = config.sourceTimeouts?.[name];
@@ -307,6 +326,7 @@ export class SurfRuntime implements SurfService {
       let lastCode: ReturnType<typeof safeError>['code'] = 'search_exhausted';
       let answered = false;
       let answeredCode: 'search_empty' | undefined;
+      const forceAll = providers.every(name => this.coolingLeft(name) > 0);
       for (const [index, provider] of providers.entries()) {
         if (signal.aborted) throw new SurfError('cancelled');
         const started = performance.now();
@@ -314,6 +334,11 @@ export class SurfRuntime implements SurfService {
         let limitSignal: AbortSignal | undefined;
         try {
           if (remaining < 1) throw new SurfError('timeout');
+          const cooling = forceAll ? 0 : this.coolingLeft(provider);
+          if (cooling > 0) {
+            fallback.push({ provider, elapsedMs: 0, code: 'source_cooling', reason: '上次连续失败，冷却中，还剩 ' + cooling + ' 秒，这次跳过。' });
+            continue;
+          }
           const timeoutMs = this.sourceBudget(config, provider, index, providers.length, remaining);
           limitSignal = AbortSignal.timeout(timeoutMs);
           const attemptSignal = AbortSignal.any([signal, limitSignal]);
@@ -326,6 +351,7 @@ export class SurfRuntime implements SurfService {
             fallback.push({ provider, elapsedMs: Math.round(performance.now() - started), code: 'search_empty', reason: '来源返回零条结果。' });
             continue;
           }
+          this.noteSourceSuccess(provider);
           const trimmed = trimResults(results, config.resultsMaxChars);
           const found: SearchData = { provider, results: trimmed.results, untrusted: true, elapsedMs: Math.round(performance.now() - started),
             ...(trimmed.truncated ? { truncated: trimmed.truncated } : {}),
@@ -337,6 +363,7 @@ export class SurfRuntime implements SurfService {
           const failure = safeError(limitSignal?.aborted || performance.now() >= deadline || remaining < 1
             ? new SurfError('timeout') : error);
           lastCode = failure.code;
+          this.noteSourceFailure(config, provider, failure.code);
           fallback.push({ provider, elapsedMs: Math.round(performance.now() - started), code: failure.code, reason: failure.message });
         }
       }
@@ -374,6 +401,7 @@ export class SurfRuntime implements SurfService {
       let lastCode: ReturnType<typeof safeError>['code'] = 'search_exhausted';
       let answeredCode: 'search_empty' | undefined;
       let answered = false;
+      const forceAll = sources.every(name => this.coolingLeft(name) > 0);
       for (const [index, source] of sources.entries()) {
         if (signal.aborted) throw new SurfError('cancelled');
         const started = performance.now();
@@ -381,6 +409,11 @@ export class SurfRuntime implements SurfService {
         let limitSignal: AbortSignal | undefined;
         try {
           if (remaining < 1) throw new SurfError('timeout');
+          const cooling = forceAll ? 0 : this.coolingLeft(source);
+          if (cooling > 0) {
+            fallback.push({ provider: source as unknown as SearchProvider, elapsedMs: 0, code: 'source_cooling', reason: '上次连续失败，冷却中，还剩 ' + cooling + ' 秒，这次跳过。' });
+            continue;
+          }
           const timeoutMs = this.sourceBudget(config, source, index, sources.length, remaining);
           limitSignal = AbortSignal.timeout(timeoutMs);
           const attemptSignal = AbortSignal.any([signal, limitSignal]);
@@ -403,6 +436,7 @@ export class SurfRuntime implements SurfService {
             continue;
           }
           if (kept.length < items.length) notes.push('按 yearMin 过滤掉 ' + (items.length - kept.length) + ' 条早于 ' + yearMin + ' 年的记录。');
+          this.noteSourceSuccess(source);
           const found: ScholarData = { source, items: kept, untrusted: true as const, elapsedMs: Math.round(performance.now() - started),
             ...(fallback.length ? { fallback } : {}), ...(notes.length ? { notes } : {}) };
           this.cachePut(config, signal, scholarKey, found);
@@ -412,6 +446,7 @@ export class SurfRuntime implements SurfService {
           const failure = safeError(limitSignal?.aborted || performance.now() >= deadline || remaining < 1
             ? new SurfError('timeout') : error);
           lastCode = failure.code;
+          this.noteSourceFailure(config, source, failure.code);
           fallback.push({ provider: source as unknown as SearchProvider, elapsedMs: Math.round(performance.now() - started),
             code: failure.code, reason: failure.message });
         }
@@ -446,6 +481,7 @@ export class SurfRuntime implements SurfService {
       let lastCode: ReturnType<typeof safeError>['code'] = 'search_exhausted';
       let answered = false;
       let answeredCode: 'search_empty' | undefined;
+      const forceAll = sources.every(name => this.coolingLeft(name) > 0);
       for (const [index, source] of sources.entries()) {
         if (signal.aborted) throw new SurfError('cancelled');
         const started = performance.now();
@@ -453,6 +489,11 @@ export class SurfRuntime implements SurfService {
         let limitSignal: AbortSignal | undefined;
         try {
           if (remaining < 1) throw new SurfError('timeout');
+          const cooling = forceAll ? 0 : this.coolingLeft(source);
+          if (cooling > 0) {
+            fallback.push({ source, elapsedMs: 0, code: 'source_cooling', reason: '上次连续失败，冷却中，还剩 ' + cooling + ' 秒，这次跳过。' });
+            continue;
+          }
           const timeoutMs = this.sourceBudget(config, source, index, sources.length, remaining);
           limitSignal = AbortSignal.timeout(timeoutMs);
           const attemptSignal = AbortSignal.any([signal, limitSignal]);
@@ -472,6 +513,7 @@ export class SurfRuntime implements SurfService {
               reason: '来源返回零条结果。' });
             continue;
           }
+          this.noteSourceSuccess(source);
           const found: FactData = { source, items, untrusted: true as const, elapsedMs: Math.round(performance.now() - started),
             ...(fallback.length ? { fallback } : {}) };
           this.cachePut(config, signal, factKey, found);
@@ -481,6 +523,7 @@ export class SurfRuntime implements SurfService {
           const failure = safeError(limitSignal?.aborted || performance.now() >= deadline || remaining < 1
             ? new SurfError('timeout') : error);
           lastCode = failure.code;
+          this.noteSourceFailure(config, source, failure.code);
           fallback.push({ source, elapsedMs: Math.round(performance.now() - started), code: failure.code, reason: failure.message });
         }
       }
