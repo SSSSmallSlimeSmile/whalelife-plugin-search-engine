@@ -140,6 +140,7 @@ export const settingsPage = `<!doctype html>
 </style></head><body>
 <section class="panel"><div class="panel-header"><div class="pg-tabs">
 <button type="button" class="pg-tab on" data-goto="source">来源</button>
+<button type="button" class="pg-tab" data-goto="tools">工具</button>
 <button type="button" class="pg-tab" data-goto="scholar">学术</button>
 <button type="button" class="pg-tab" data-goto="facts">事实</button>
 <button type="button" class="pg-tab" data-goto="search">搜索</button>
@@ -169,8 +170,6 @@ export const settingsPage = `<!doctype html>
   <div class="preset-group"><span class="preset-title">无需 Key</span>
     <div class="preset" role="button" tabindex="0" data-provider="anysearch" data-needkey="0"><b>anysearch</b><span>聚合搜索，不带 Key 走匿名额度；分 cn / intl 两区，垂直频道只有它支持</span><em>点一下加进来</em><i class="more" title="设置" role="button" tabindex="0">⋯</i></div>
     <div class="preset" role="button" tabindex="0" data-provider="duckduckgo" data-needkey="0"><b>duckduckgo</b><span>解析结果页 HTML，不需要 Key；对方改版就可能失效</span><em>点一下加进来</em><i class="more" title="设置" role="button" tabindex="0">⋯</i></div>
-    <div class="preset" role="button" tabindex="0" data-provider="github" data-needkey="0"><b>github</b><span>官方仓库搜索接口，不需要 Key；未登录每小时 60 次，超了会明说被限流</span><em>点一下加进来</em><i class="more" title="设置" role="button" tabindex="0">⋯</i></div>
-    <div class="preset" role="button" tabindex="0" data-provider="huggingface" data-needkey="0"><b>huggingface</b><span>模型库搜索，返回 id、任务类型、下载量；不需要 Key</span><em>点一下加进来</em><i class="more" title="设置" role="button" tabindex="0">⋯</i></div>
   </div>
   <div class="preset-group"><span class="preset-title">需要 Key</span>
     <div class="preset" role="button" tabindex="0" data-provider="brave" data-needkey="1"><b>brave</b><span>官方 JSON 接口，最稳的一档；要 Brave Search API Key</span><em>点一下加进来</em><i class="more" title="设置" role="button" tabindex="0">⋯</i></div>
@@ -214,6 +213,16 @@ export const settingsPage = `<!doctype html>
 <p class="pg-hint">按序列化后的长度算，不是字数。十条各带一千字摘要就是一万字进上下文、之后每轮重发。超出时先截断最后一条的摘要，再超出就丢掉后面的条目；0 = 不限。默认 8000。</p></div>
 <div class="pg-item"><span class="pg-label">被截断时回执长什么样</span><p class="pg-hint" style="margin-top:0">results 里条目变少，多一个 truncated 字段写着丢了几条；摘要被切的那条末尾带省略号。至少保留一条，不会因此变成"零条结果"。</p></div>
 </div>
+</section>
+
+<section class="pg-group" id="pg-tools" hidden>
+<p class="pg-desc">这一类不是搜索引擎，是几个专用检索接口：查的是仓库和模型库，不是网页。它们不进来源链、不参与聚合——每次搜网页都顺带打一发仓库接口只会白花钱。要查就在这一页直接试。</p>
+<div class="pg-pair"><div class="pg-item"><span class="pg-label">查哪个</span>
+<select id="toolPick" class="chain-sel"><option value="github">github · 仓库</option><option value="huggingface">huggingface · 模型库</option></select></div>
+<div class="pg-item"><span class="pg-label">查询词</span><input type="text" id="toolQuery" class="chain-sel" placeholder="查询词，留空用 whalelife"></div></div>
+<div class="chain-add"><button class="btn" type="button" id="toolProbe">试一下</button><span class="chain-msg" id="toolMsg"></span></div>
+<p class="pg-hint">github 未登录每小时 60 次，超了会明说被限流；huggingface 按模型名和标签匹配，不是全文检索——搜「bert」有，搜一句话往往零条。两家都不需要 Key。</p>
+<div class="probe-out" id="toolOut" hidden></div>
 </section>
 
 <section class="pg-group" id="pg-search" hidden>
@@ -1047,6 +1056,10 @@ byId("tagSel").onchange = () => {
   for (const k of req) skel[k] = "";
   byId("paramsInput").value = req.length ? JSON.stringify(skel) : "";
 };
+byId("toolProbe").onclick = () => {
+  probe({ provider: byId("toolPick").value, query: byId("toolQuery").value.trim() || undefined }, byId("toolMsg"));
+};
+
 byId("probeVertical").onclick = () => {
   const tag = byId("tagInput").value.trim();
   if (!tag) { byId("vMsg").className = "chain-msg err"; byId("vMsg").textContent = "先填 tag"; return; }
