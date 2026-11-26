@@ -276,8 +276,13 @@ export function createPublicFetcher(dependencies: NetworkDependencies = {}): Pub
           if (!response.headers.location) throw new SurfError('http_error');
           let next: URL;
           try { next = new URL(response.headers.location, url); } catch { throw new SurfError('unsafe_url'); }
-          url = parsePublicUrl(next.href);
+          next = parsePublicUrl(next.href);
+          if (next.origin !== url.origin) {
+            delete headers.authorization;
+            delete headers['x-api-key'];
+          }
           delete headers['x-subscription-token'];
+          url = next;
         }
       } catch (error) {
         if (stopped) throw new SurfError('stopped');

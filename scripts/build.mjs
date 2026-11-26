@@ -39,4 +39,4 @@ function visit(directory) {
 visit(out);
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 writeFileSync(join(out, 'BUILD.json'), JSON.stringify({ version: pkg.version, node: process.version, platform: process.platform, arch: process.arch, files }, null, 2) + '\n');
-console.log(`Built ${Object.keys(files).length} files in dist/surf (${process.platform}/${process.arch})`);
+console.log(`Built ${Object.keys(files).length} files in dist/search-engine (${process.platform}/${process.arch})`);
