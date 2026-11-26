@@ -3,7 +3,7 @@
  * Additional terms under AGPLv3 Section 7: see LICENSE-ADDITIONAL.
  */
 import { mkdirSync, existsSync, lstatSync, realpathSync, rmSync, cpSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { join, dirname, resolve, relative } from 'node:path';
+import { basename, join, dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
@@ -17,8 +17,13 @@ if (existsSync(out)) {
   rmSync(out, { recursive: true });
 }
 mkdirSync(out);
+function includeReleaseFile(path) {
+  const name = basename(path).toLowerCase();
+  return !['data', '.tmp', 'tests', '.artifacts'].includes(name) && !name.includes('.bak-');
+}
+
 for (const file of ['src', 'vendor', 'index.ts', 'plugin.yaml', 'package.json', 'package-lock.json', 'README.md', 'CONTRACT.md', 'LICENSE', 'LICENSE-ADDITIONAL', 'NOTICE.md', 'THIRD_PARTY_NOTICES.md'])
-  cpSync(join(root, file), join(out, file), { recursive: true });
+  cpSync(join(root, file), join(out, file), { recursive: true, filter: includeReleaseFile });
 const npm = join(dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js');
 const result = spawnSync(process.execPath, [npm, 'ls', '--omit=dev', '--all', '--parseable'], { cwd: root, encoding: 'utf8', windowsHide: true });
 if (result.status !== 0) throw Error('Cannot resolve production dependencies');
